@@ -269,6 +269,7 @@ class LaserRotEffect(Effect):
     def build(self, params):
         self.param("density", "Density", 0.35, 0.0, 1.0)
         self.param("coarse", "Size", 0.2, 0.0, 1.0)
+        self.param("thickness", "Thickness", 0.2, 0.0, 1.0)  # vertical height of rot
         self.param("locality", "Locality", 0.5, 0.0, 1.0)   # patchy <-> full frame
         self.param("color", "Colour", 0.9, 0.0, 1.0)
 
@@ -278,12 +279,15 @@ class LaserRotEffect(Effect):
         h, w = frame.shape[:2]
         rng = np.random.default_rng((int(t * 30) ^ 0x9E3779B9) & 0xFFFFFFFF)
 
-        # coloured noise stretched horizontally so it follows the raster lines
+        # coloured noise stretched horizontally so it follows the raster lines,
+        # and blocked vertically so the rot lines can gain height ("chonk")
         streak = 2 + int(v["coarse"] * 10)          # horizontal smear length
+        vthick = 1 + int(v["thickness"] * 10)       # vertical line height
         nw = max(1, w // streak)
-        cn = rng.integers(0, 256, (h, nw, 3), np.uint8)
+        nh = max(1, h // vthick)
+        cn = rng.integers(0, 256, (nh, nw, 3), np.uint8)
         cn = cv2.resize(cn, (w, h), interpolation=cv2.INTER_LINEAR)
-        cn = cv2.blur(cn, (streak, 1))              # smooth along the line
+        cn = cv2.blur(cn, (streak, vthick))         # smooth along the line + height
         if v["color"] < 0.999:                       # colour <-> mono sparkle
             gray = cn.mean(2, keepdims=True)
             cn = (cn * v["color"] + gray * (1 - v["color"])).astype(np.uint8)
@@ -298,13 +302,13 @@ class LaserRotEffect(Effect):
                            interpolation=cv2.INTER_LINEAR)
         dens_field = np.power(field, v["locality"] * 8.0)
 
-        # sparkle alpha, also horizontally streaked, soft-thresholded
-        amp = rng.random((h, nw)).astype(np.float32)
+        # sparkle alpha, streaked horizontally and blocked vertically, soft-thresholded
+        amp = rng.random((nh, nw)).astype(np.float32)
         amp = cv2.resize(amp, (w, h), interpolation=cv2.INTER_LINEAR)
         thresh = 1.0 - v["density"]
         spark = np.clip((amp - thresh) / max(1e-3, 1.0 - thresh), 0.0, 1.0)
         alpha = np.clip(spark * dens_field, 0.0, 1.0) * 0.9
-        alpha = cv2.blur(alpha, (streak, 1))         # smear the blend along x
+        alpha = cv2.blur(alpha, (streak, vthick))    # smear the blend along x + height
         a = alpha[..., None].astype(np.float32)
 
         f = frame.astype(np.float32)
