@@ -56,7 +56,7 @@ uniform float u_hheight,u_hnoise,u_hshift;
 uniform float u_istr,u_ioff;
 uniform float u_damt;
 uniform float u_bits;
-uniform float u_ldens,u_lcoarse,u_lloc,u_lcolor;
+uniform float u_ldens,u_lcoarse,u_lloc,u_lcolor,u_lthick;
 const float PI = 3.14159265;
 
 float hash21(vec2 p){
@@ -181,7 +181,8 @@ void main(){
     } else if(effect == 16){
         col = S(uv);
         float streak = 2.0 + u_lcoarse*10.0;
-        vec2 cc = vec2(floor(gl_FragCoord.x/streak), floor(gl_FragCoord.y));
+        float vthick = 1.0 + u_lthick*10.0;
+        vec2 cc = vec2(floor(gl_FragCoord.x/streak), floor(gl_FragCoord.y/vthick));
         float tf = floor(t*30.0);
         vec3 c = vec3(hash21(cc+tf+1.0), hash21(cc+tf+7.0), hash21(cc+tf+13.0));
         c = mix(vec3(dot(c, vec3(0.333))), c, u_lcolor);
@@ -229,6 +230,7 @@ _PARAM_UNIFORMS = {
     "u_bits": "bitcrush.bits",
     "u_ldens": "laserrot.density", "u_lcoarse": "laserrot.coarse",
     "u_lloc": "laserrot.locality", "u_lcolor": "laserrot.color",
+    "u_lthick": "laserrot.thickness",
 }
 
 
