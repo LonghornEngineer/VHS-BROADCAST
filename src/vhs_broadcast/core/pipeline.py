@@ -423,6 +423,9 @@ def render_to_file(
             if tmp_video and os.path.exists(tmp_video):
                 if not ok:
                     # muxing failed -> fall back to the silent video
+                    import sys as _sys
+                    print("warning: could not attach audio; wrote silent video",
+                          file=_sys.stderr)
                     import shutil
                     shutil.move(tmp_video, output_path)
                 else:

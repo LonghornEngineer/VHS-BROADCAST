@@ -46,6 +46,8 @@ def load_audio(path: str) -> Optional[tuple[np.ndarray, int]]:
             for rf in resampler.resample(frame):
                 arr = rf.to_ndarray()          # (channels, samples) planar float
                 chunks.append(arr.T)           # -> (samples, channels)
+        for rf in resampler.resample(None):    # flush the resampler's tail
+            chunks.append(rf.to_ndarray().T)
         container.close()
         if not chunks:
             return None
@@ -82,29 +84,36 @@ def resample_wobble(samples: np.ndarray, sr: int,
 
 def mux_audio_into_video(video_path: str, samples: np.ndarray, sr: int,
                          out_path: str, fps: float) -> bool:
-    """Copy an existing (silent) video file and add a PCM/AAC audio track."""
+    """Copy an existing (silent) video file and add an AAC audio track.
+
+    The video stream is *stream-copied* (remuxed) rather than re-encoded, so it
+    stays bit-for-bit identical to what the renderer wrote, the mux is fast, and
+    there is no second lossy encode step to fail on odd inputs. Returns True on
+    success; on failure it logs why and returns False (the caller then keeps the
+    silent video) instead of failing silently.
+    """
     if not HAVE_AV or samples is None or samples.size == 0:
         return False
+    import logging
+    from fractions import Fraction
+
+    src = out = None
     try:
         src = av.open(video_path)
         vin = src.streams.video[0]
         out = av.open(out_path, "w")
-        vout = out.add_stream("mpeg4", rate=int(round(fps)))
-        vout.width = vin.codec_context.width
-        vout.height = vin.codec_context.height
-        vout.pix_fmt = "yuv420p"
+        # stream-copy the encoded video packets -- no re-encode
+        vout = out.add_stream_from_template(vin)
         aout = out.add_stream("aac", rate=sr)
         aout.layout = "stereo"
 
-        for frame in src.decode(vin):
-            frame = frame.reformat(format="yuv420p")
-            for pkt in vout.encode(frame):
-                out.mux(pkt)
-        for pkt in vout.encode():
+        for pkt in src.demux(vin):
+            if pkt.dts is None:          # flush packet at end of demux
+                continue
+            pkt.stream = vout
             out.mux(pkt)
 
         # audio: feed planar float in 1024-sample frames with running pts
-        from fractions import Fraction
         planar = np.ascontiguousarray(samples.T)   # (channels, N)
         n = planar.shape[1]
         block = 1024
@@ -125,7 +134,19 @@ def mux_audio_into_video(video_path: str, samples: np.ndarray, sr: int,
         out.close()
         src.close()
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "audio mux failed (%s); writing video without sound", exc)
+        try:
+            if out is not None:
+                out.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if src is not None:
+                src.close()
+        except Exception:  # noqa: BLE001
+            pass
         return False
 
 
