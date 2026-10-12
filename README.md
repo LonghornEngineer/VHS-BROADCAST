@@ -4,6 +4,8 @@ A desktop video-effects studio for VHS damage, CRT treatments, dithering, pixel
 sorting and digital glitches. Tune effects live, drive them from audio, and save
 manual keyframes for repeatable file renders. Processing stays local.
 
+![VHS Broadcast Deck with tracking, chroma, head-switch and scanline effects on a retro sunset clip](docs/images/vhs.png)
+
 **Early release:** Windows is the primary tested platform. File rendering and
 headless tests are automated; live devices, audio backends and long editing
 sessions still need broader testing. macOS/Linux support depends on available
@@ -38,6 +40,8 @@ Keep those assets with your project when moving it to another computer.
 ## Keyframes: experiment first, save changes deliberately
 
 **Moving a slider never creates a keyframe.** The timeline sits below the preview.
+
+![Keyframe editor below the preview, with a keyframe on the Tracking band size](docs/images/main-window.png)
 Drag the divider to resize the two areas, or use **TIMELINE** to hide/show it.
 
 For example, to gradually increase Block Corruption:
@@ -144,6 +148,12 @@ position controls jump to their assigned position instead.
 
 Use the search field or **Enabled only** to find controls. Drag effects in
 **SIGNAL CHAIN** to change processing order, including where text is composited.
+
+| Digital damage | Game Boy dither |
+| --- | --- |
+| ![Block Corruption, RGB Channel Torture and Pixel Sort](docs/images/glitch.png) | ![Game Boy / Pocket Video with Bayer dithering](docs/images/dither.png) |
+
+![Signal chain tab showing the processing order of enabled effects](docs/images/signal-chain.png)
 
 | Family | Examples |
 | --- | --- |
