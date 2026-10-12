@@ -9,7 +9,6 @@ is a passthrough here -- it is consumed by the engine/renderer to warp time.
 from __future__ import annotations
 
 import math
-import time as _time
 
 import cv2
 import numpy as np
@@ -17,6 +16,7 @@ import numpy as np
 from ..core.parameters import ParameterSet
 from .base import Effect
 from .text_render import available_fonts, default_font, draw_texts
+from .advanced import ADVANCED_EFFECTS
 
 
 # --------------------------------------------------------------------------- #
@@ -87,11 +87,12 @@ class WobbleEffect(Effect):
 
     def process(self, frame, t, v):
         h, w = frame.shape[:2]
+        phase = self.params.motion_phase("wobble.speed", t)
         amp = v["amount"] * w * 0.03
         if amp < 0.5:
             return frame
         rows = np.arange(h, dtype=np.float32)
-        shift = amp * np.sin(rows / h * v["freq"] * 2 * math.pi + t * v["speed"])
+        shift = amp * np.sin(rows / h * v["freq"] * 2 * math.pi + phase)
         map_x = np.arange(w, dtype=np.float32)[None, :] + shift[:, None]
         map_y = np.repeat(rows[:, None], w, axis=1)
         return cv2.remap(frame, map_x, map_y, cv2.INTER_LINEAR,
@@ -108,8 +109,8 @@ class TrackingEffect(Effect):
     def build(self, params):
         self.param("band", "Band Size", 0.15, 0.0, 0.5)
         self.param("jitter", "Jitter", 0.4, 0.0, 1.0)
-        # V-Roll can go negative; modulate it to make the picture drift up/down
-        self.param("roll", "V-Roll", 0.0, -1.0, 1.0)
+        # A direct offset is separate from the accumulated roll speed.
+        self.param("roll", "V-Offset", 0.0, -1.0, 1.0)
         # continuous roll rate: quadratic response so small values stay gentle
         self.param("rollspeed", "Roll Rate", 0.0, -1.0, 1.0, step=0.01)
         self.param("speed", "Scroll", 0.3, 0.0, 3.0, step=0.05)
@@ -118,14 +119,15 @@ class TrackingEffect(Effect):
         h, w = frame.shape[:2]
         out = frame
         # signed static roll + gentle continuous wrapping roll
-        rate = v["rollspeed"] * abs(v["rollspeed"]) * 0.6   # max ~0.6 screens/s
-        offset = int(round((v["roll"] + rate * t) * h))
+        travel = self.params.motion_phase("tracking.rollspeed", t, quadratic=True) * 0.6
+        scroll = self.params.motion_phase("tracking.speed", t)
+        offset = int(round((v["roll"] + travel) * h))
         if offset % h != 0:
             out = np.roll(out, offset, axis=0)
         # distortion band that scrolls up the frame
         band_h = int(v["band"] * h)
         if band_h > 1 and v["jitter"] > 1e-3:
-            centre = int((1.0 - (t * v["speed"]) % 1.0) * h)
+            centre = int((1.0 - scroll % 1.0) * h)
             y0 = max(0, centre - band_h // 2)
             y1 = min(h, centre + band_h // 2)
             if y1 > y0:
@@ -426,8 +428,12 @@ class TextOverlayEffect(Effect):
         self.corner_text = "SP"
         self.clock_mode = self.CLOCK_BLINK
         self.font_path = default_font()
+        self.manual_clock = False
+        self.manual_datetime = "1994-01-01T12:00:00"
+        self.clock_run = True
         super().__init__(params)
         self.enabled_param().set_base(1.0, notify=False)  # OSD on by default
+        self.enabled_param().default = 1.0
 
     def build(self, params):
         self.param("scale", "Size", 1.0, 0.3, 3.0, step=0.05)
@@ -437,6 +443,22 @@ class TextOverlayEffect(Effect):
 
     def fonts(self):
         return available_fonts()
+
+    def settings(self):
+        return {k: getattr(self, k) for k in (
+            "custom_text", "corner_text", "clock_mode", "font_path",
+            "manual_clock", "manual_datetime", "clock_run")}
+
+    def restore_settings(self, data):
+        from datetime import datetime
+        for k in self.settings():
+            if k in data:
+                if k == "manual_datetime":
+                    try:
+                        datetime.fromisoformat(data[k])
+                    except (ValueError, TypeError):
+                        continue
+                setattr(self, k, data[k])
 
     def build_items(self, t, w, h):
         g = lambda k: self.params.get(f"text.{k}").evaluate(t)  # noqa: E731
@@ -450,15 +472,21 @@ class TextOverlayEffect(Effect):
         clk = None
         show = True
         m = self.clock_mode
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        if self.manual_clock:
+            now = datetime.fromisoformat(self.manual_datetime)
+            if self.clock_run:
+                now += timedelta(seconds=max(0.0, t))
         if m == self.CLOCK_BLINK:
             clk = "12:00"
             show = (int(t * 1.5) % 2 == 0)      # blink ~0.75 Hz (deterministic)
         elif m == self.CLOCK_TIME:
-            clk = _time.strftime("%H:%M:%S")
+            clk = now.strftime("%H:%M:%S")
         elif m == self.CLOCK_DATE:
-            clk = _time.strftime("%b %d %Y").upper()
+            clk = now.strftime("%b %d %Y").upper()
         elif m == self.CLOCK_DATETIME:
-            clk = _time.strftime("%m/%d %H:%M")
+            clk = now.strftime("%m/%d/%Y %H:%M:%S")
         elif m == self.CLOCK_TIMER:
             clk = f"{int(t // 60):02d}:{int(t % 60):02d}:{int((t * 100) % 100):02d}"
         if clk and show:
@@ -488,7 +516,7 @@ class DownsampleEffect(Effect):
 
     def process(self, frame, t, v):
         # spatial pixelate only; the temporal FPS hold is applied by the engine
-        # (so it works identically on the CPU and GPU paths)
+        # before displaying the processed output
         if v["amount"] < 1e-3:
             return frame
         h, w = frame.shape[:2]
@@ -578,10 +606,10 @@ class ScrambleEffect(Effect):
                             borderMode=cv2.BORDER_WRAP)
 
         # 2) vertical roll / loss of V-hold (continuous, wraps)
-        if v["roll"] > 1e-3:
-            voff = int((t * v["roll"] * 1.7 * h) % h)
-            if voff:
-                out = np.roll(out, voff, axis=0)
+        travel = self.params.motion_phase("scramble.roll", t) * 1.7
+        voff = int((travel * h) % h)
+        if voff:
+            out = np.roll(out, voff, axis=0)
 
         # 3) inversion bands scrolling down the frame (video inversion scramble)
         if v["invert"] > 1e-3:
@@ -616,10 +644,208 @@ class MotorEffect(Effect):
         return frame  # time-warp is applied outside the pixel pipeline
 
 
+class EdgeRingEffect(Effect):
+    """Bright/dark analogue enhancer halos, with a shifted ringing echo."""
+    id = "edge_ring"
+    label = "EDGE RING"
+
+    def build(self, params):
+        self.param("amount", "Amount", 0.4)
+        self.param("width", "Width", 0.25)
+        self.param("echo", "Echo", 0.3)
+
+    def process(self, frame, t, v):
+        if v["amount"] <= 0:
+            return frame
+        f = frame.astype(np.float32)
+        sigma = max(0.3, frame.shape[1] / 720 * (0.5 + 7 * v["width"]))
+        edge = f - cv2.GaussianBlur(f, (0, 0), sigma)
+        offset = max(1, int(sigma * 2))
+        ringing = edge - np.roll(edge, offset, axis=1) * v["echo"]
+        return np.clip(f + ringing * v["amount"] * 4, 0, 255).astype(np.uint8)
+
+
+class SolarizeEffect(Effect):
+    """Fold highlights back into shadows for a bent colour-inverter look."""
+    id = "solarize"
+    label = "SOLARIZE"
+
+    def build(self, params):
+        self.param("amount", "Amount", 0.5)
+        self.param("threshold", "Cutoff", 0.55)
+
+    def process(self, frame, t, v):
+        if v["amount"] <= 0:
+            return frame
+        f = frame.astype(np.float32)
+        bent = np.where(f >= v["threshold"] * 255, 255 - f, f)
+        return np.clip(f + (bent - f) * v["amount"], 0, 255).astype(np.uint8)
+
+
+class SignalFoldEffect(Effect):
+    """Video voltage overdrive folded into repeated colour contours."""
+    id = "signal_fold"
+    label = "SIGNAL FOLD"
+
+    def build(self, params):
+        self.param("amount", "Amount", 0.35)
+        self.param("drive", "Drive", 2.5, 1.0, 8.0)
+        self.param("bias", "Bias", 0.0, -1.0, 1.0)
+
+    def process(self, frame, t, v):
+        if v["amount"] <= 0:
+            return frame
+        f = frame.astype(np.float32) / 255
+        folded = 1 - np.abs(np.mod(f * v["drive"] + v["bias"], 2) - 1)
+        return np.clip((f + (folded - f) * v["amount"]) * 255, 0, 255).astype(np.uint8)
+
+
+class FrameMoveEffect(Effect):
+    """Center-based camera transform with toroidal (tiled) image boundaries."""
+    id = "frame_move"
+    label = "FRAME MOVE / WRAP"
+
+    def build(self, params):
+        self.param("zoom", "Zoom", 1, .25, 4, step=.01)
+        self.param("x", "Pan X", 0, -1, 1)
+        self.param("y", "Pan Y", 0, -1, 1)
+        self.param("angle", "Rotate", 0, -180, 180, step=1)
+        self.param("xspeed", "X Rate", 0, -1, 1)
+        self.param("yspeed", "Y Rate", 0, -1, 1)
+
+    def process(self, frame, t, v):
+        h, w = frame.shape[:2]
+        travel_x = self.params.motion_phase("frame_move.xspeed", t)
+        travel_y = self.params.motion_phase("frame_move.yspeed", t)
+        pan_x, pan_y = v["x"] + travel_x, v["y"] + travel_y
+        zoom = max(.25, v["zoom"])
+        if zoom == 1 and pan_x == 0 and pan_y == 0 and v["angle"] == 0:
+            return frame
+        cx, cy = (w - 1) / 2, (h - 1) / 2
+        angle = math.radians(v["angle"])
+        cosine, sine = math.cos(angle), math.sin(angle)
+        # Translate the picture in output coordinates, then inverse-rotate and
+        # inverse-scale around its centre to find the source pixel. Reduce the
+        # offset in source space so long continuous rolls retain precision.
+        offset_x = ((cosine * pan_x * w + sine * pan_y * h) / zoom) % w
+        offset_y = ((-sine * pan_x * w + cosine * pan_y * h) / zoom) % h
+        x = np.arange(w, dtype=np.float32)[None, :] - cx
+        y = np.arange(h, dtype=np.float32)[:, None] - cy
+        map_x = ((cosine * x + sine * y) / zoom + cx - offset_x).astype(np.float32)
+        map_y = ((-sine * x + cosine * y) / zoom + cy - offset_y).astype(np.float32)
+        return cv2.remap(frame, map_x, map_y, cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_WRAP)
+
+
+class BloomEffect(Effect):
+    """Soft phosphor-like glow around bright highlights."""
+    id = "bloom"
+    label = "CRT BLOOM"
+
+    def build(self, params):
+        self.param("amount", "Amount", .35)
+        self.param("threshold", "Cutoff", .65)
+        self.param("radius", "Radius", .3)
+
+    def process(self, frame, t, v):
+        if v["amount"] <= 0:
+            return frame
+        f = frame.astype(np.float32) / 255
+        highlights = np.maximum(f - v["threshold"], 0)
+        sigma = max(.3, frame.shape[1] / 720 * (1 + 18 * v["radius"]))
+        glow = cv2.GaussianBlur(highlights, (0, 0), sigma)
+        return np.clip((f + glow * v["amount"] * 3) * 255, 0, 255).astype(np.uint8)
+
+
+class HueShiftEffect(Effect):
+    """Chroma rotation with an optional continuous colour cycle."""
+    id = "hue_shift"
+    label = "HUE SHIFT"
+
+    def build(self, params):
+        self.param("amount", "Mix", .75)
+        self.param("angle", "Hue", 0, -180, 180, step=1)
+        self.param("speed", "Cycle", 0, -1, 1)
+
+    def process(self, frame, t, v):
+        phase = self.params.motion_phase("hue_shift.speed", t)
+        if v["amount"] <= 0:
+            return frame
+        hsv = cv2.cvtColor(frame.astype(np.float32) / 255, cv2.COLOR_BGR2HSV)
+        hsv[..., 0] = (hsv[..., 0] + v["angle"] + phase * 360) % 360
+        shifted = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR) * 255
+        return np.clip(frame * (1 - v["amount"]) + shifted * v["amount"], 0, 255).astype(np.uint8)
+
+
+class PixelSortEffect(Effect):
+    """Sort contiguous bright runs along scanlines, keeping dark boundaries."""
+    id = "pixel_sort"
+    label = "PIXEL SORT"
+
+    def build(self, params):
+        self.param("amount", "Mix", .6)
+        self.param("threshold", "Cutoff", .45)
+        self.param("length", "Length", .35)
+        self.param("reverse", "Reverse", 0, 0, 1, step=1)
+        self.param("upper", "High Cut", 1)
+        self.choice("direction", "Direction", ("Horizontal", "Vertical"))
+        self.choice("metric", "Sort By", ("Brightness", "Hue", "Saturation", "Red", "Green", "Blue"))
+        self.param("outside", "Outside Band", 0, 0, 1, step=1)
+
+    def process(self, frame, t, v):
+        if v["amount"] <= 0:
+            return frame
+        source = frame.transpose(1, 0, 2) if v["direction"] >= .5 else frame
+        metric = int(v["metric"])
+        if metric == 0:
+            luminance = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+        elif metric in (1, 2):
+            hsv = cv2.cvtColor(source, cv2.COLOR_BGR2HSV)
+            luminance = hsv[..., metric - 1].astype(np.float32)
+            if metric == 1:
+                luminance = np.minimum(255, luminance * (255 / 179))
+        else:
+            luminance = source[..., 5 - metric]
+        low, high = sorted((v["threshold"] * 255, v["upper"] * 255))
+        mask = (luminance >= low) & (luminance <= high)
+        if v["outside"] >= .5:
+            mask = ~mask
+        out = source.copy()
+        run_limit = max(2, int(source.shape[1] * max(.01, v["length"])))
+        for y in range(source.shape[0]):
+            changes = np.flatnonzero(np.diff(np.r_[False, mask[y], False]))
+            for start, end in zip(changes[::2], changes[1::2]):
+                for left in range(start, end, run_limit):
+                    right = min(left + run_limit, end)
+                    if right - left < 2:
+                        continue
+                    order = np.argsort(luminance[y, left:right], kind="stable")
+                    if v["reverse"] >= .5:
+                        order = order[::-1]
+                    out[y, left:right] = source[y, left:right][order]
+        if v["direction"] >= .5:
+            out = np.ascontiguousarray(out.transpose(1, 0, 2))
+        return cv2.addWeighted(frame, 1 - v["amount"], out, v["amount"], 0)
+
+
 def default_effects(params: ParameterSet) -> list[Effect]:
+    from .glitch import RasterHoldEffect, RollingShutterEffect
+    from .retro import GameBoyEffect, NESCorruptionEffect, RGBTortureEffect
     return [
         TextOverlayEffect(params),
+        FrameMoveEffect(params),
         SignalEffect(params),
+        EdgeRingEffect(params),
+        SolarizeEffect(params),
+        SignalFoldEffect(params),
+        BloomEffect(params),
+        HueShiftEffect(params),
+        PixelSortEffect(params),
+        GameBoyEffect(params),
+        NESCorruptionEffect(params),
+        RGBTortureEffect(params),
+        RasterHoldEffect(params),
+        RollingShutterEffect(params),
         SlewEffect(params),
         WobbleEffect(params),
         TrackingEffect(params),
@@ -636,4 +862,5 @@ def default_effects(params: ParameterSet) -> list[Effect]:
         TearEffect(params),
         ScrambleEffect(params),
         MotorEffect(params),
+        *[effect(params) for effect in ADVANCED_EFFECTS],
     ]

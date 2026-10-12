@@ -3,21 +3,20 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QDateTime, QThread
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit,
+    QLineEdit, QDateTimeEdit,
     QMainWindow, QMenu, QMessageBox, QProgressDialog, QPushButton,
-    QScrollArea, QSpinBox, QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
-from PySide6.QtCore import Qt, QThread
 
 from .. import config as C
 from ..core.automation import Recorder, Session, Timeline
 from ..core.engine import Mode, PlaybackEngine
 from ..core.parameters import ParameterSet
-from ..core.pipeline import FileSource, Pipeline, render_to_file
+from ..core.pipeline import FileSource, Pipeline, RenderCancelled, render_to_file
 from ..core.audio import load_audio, QtAudioPlayer
 from ..core.audio_react import build_analysis, set_analysis, levels_at
 from ..core.outputs import VirtualCamOutput, VideoRecorder
@@ -30,12 +29,14 @@ from .widgets.transport import Transport
 from .widgets.video_view import VideoView
 from .widgets.audio_meter import AudioMeter
 from .widgets.chain_list import ChainList
+from .widgets.keyframes import KeyframeEditor
 
 
 class RenderWorker(QThread):
     progress = Signal(float)
     done = Signal(str)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(self, src, out, params, timeline, effects, max_width):
         super().__init__()
@@ -47,8 +48,11 @@ class RenderWorker(QThread):
             src, out, params, timeline, effects = self._args
             render_to_file(src, out, params, timeline, effects,
                            max_width=self._max_width, with_audio=True,
-                           progress=lambda f: self.progress.emit(f))
+                           progress=lambda f: self.progress.emit(f),
+                           cancelled=self.isInterruptionRequested)
             self.done.emit(out)
+        except RenderCancelled:
+            self.cancelled.emit()
         except Exception as e:  # noqa: BLE001
             self.failed.emit(str(e))
 
@@ -71,7 +75,7 @@ class MainWindow(QMainWindow):
         self.audio_player = None
         self._vcam = VirtualCamOutput()
         self._recorder = VideoRecorder()
-        self.session = Session(self.params, self.timeline)
+        self.session = Session(self.params, self.timeline, self.effects)
         self.source_path: str | None = None
 
         # --- engine ---
@@ -79,6 +83,7 @@ class MainWindow(QMainWindow):
                                      self.recorder, self.timeline)
 
         self._build_ui()
+        self.params.set_change_hook(self._on_parameter_changed)
 
         self.engine.frameReady.connect(self.video.set_image)
         self.engine.positionChanged.connect(self._on_position)
@@ -106,10 +111,16 @@ class MainWindow(QMainWindow):
         body = QHBoxLayout()
         outer.addLayout(body, 1)
 
-        # left: video + transport
-        left = QVBoxLayout()
+        # The handle divides the preview/transport and timeline evenly by default.
+        self.left_splitter = QSplitter(Qt.Vertical)
+        self.left_splitter.setChildrenCollapsible(False)
+        self.left_splitter.setHandleWidth(8)
+        self.left_splitter.setToolTip("Drag the divider to resize preview and timeline")
+        preview_area = QWidget()
+        left = QVBoxLayout(preview_area)
+        left.setContentsMargins(0, 0, 0, 0)
         self.video = VideoView()
-        left.addWidget(self.video, 1)
+        left.addWidget(self.video, 2)
         self.meter = AudioMeter()
         left.addWidget(self.meter)
         pv_row = QHBoxLayout()
@@ -125,7 +136,7 @@ class MainWindow(QMainWindow):
         self.preview_cb.setToolTip(
             "Processing resolution \u2014 drives the preview, the virtual camera, "
             "and recording (one pass). Lower = faster; raise it for higher-"
-            "quality output. GPU makes the high settings cheap.")
+            "quality output.")
         pv_row.addWidget(pv_lbl); pv_row.addWidget(self.preview_cb, 1)
         self.custom_w = QSpinBox()
         self.custom_w.setRange(160, 7680)
@@ -176,13 +187,20 @@ class MainWindow(QMainWindow):
         tog_row.addWidget(self.drop_cb)
         tog_row.addWidget(self.preview_on_cb)
         tog_row.addStretch(1)
+        self.timeline_btn = QPushButton("TIMELINE")
+        self.timeline_btn.setCheckable(True)
+        self.timeline_btn.setChecked(True)
+        self.timeline_btn.setToolTip("Show or hide the keyframe editor; drag its divider to resize")
+        self.timeline_btn.toggled.connect(self._show_timeline)
+        tog_row.addWidget(self.timeline_btn)
         left.addLayout(tog_row)
         self.stats_lbl = QLabel("\u25cf idle")
         self.stats_lbl.setObjectName("Stats")
         left.addWidget(self.stats_lbl)
         self.transport = Transport()
         left.addWidget(self.transport)
-        body.addLayout(left, 3)
+        self.left_splitter.addWidget(preview_area)
+        body.addWidget(self.left_splitter, 3)
 
         # right: tabbed -> CONTROLS (OSD + effect panels) and SIGNAL CHAIN
         right = QVBoxLayout()
@@ -192,23 +210,33 @@ class MainWindow(QMainWindow):
         cv = QVBoxLayout(controls)
         cv.setContentsMargins(6, 12, 6, 6)
         cv.addWidget(self._build_osd())
+        filter_row = QHBoxLayout()
+        self.filter_search = QLineEdit()
+        self.filter_search.setPlaceholderText("Find an effect or control...")
+        self.filter_search.setClearButtonEnabled(True)
+        self.filter_search.textChanged.connect(self._filter_panels)
+        self.active_only = QCheckBox("Enabled only")
+        self.active_only.toggled.connect(self._filter_panels)
+        filter_row.addWidget(self.filter_search, 1)
+        filter_row.addWidget(self.active_only)
+        cv.addLayout(filter_row)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         holder = QWidget()
         cols = QHBoxLayout(holder); cols.setSpacing(8)
-        col_a = QVBoxLayout(); col_b = QVBoxLayout(); col_c = QVBoxLayout()
-        for c in (col_a, col_b, col_c):
+        col_a = QVBoxLayout(); col_b = QVBoxLayout()
+        for c in (col_a, col_b):
             cols.addLayout(c)
         self.panels: list[EffectPanel] = []
-        targets = [col_a, col_b, col_c]
+        targets = [col_a, col_b]
         i = 0
         for eff in self.effects:
             if isinstance(eff, TextOverlayEffect):
                 continue  # OSD has its own editor above
             panel = EffectPanel(eff)
             self.panels.append(panel)
-            targets[i % 3].addWidget(panel)
+            targets[i % len(targets)].addWidget(panel)
             i += 1
-        for c in (col_a, col_b, col_c):
+        for c in (col_a, col_b):
             c.addStretch(1)
         scroll.setWidget(holder)
         cv.addWidget(scroll, 1)
@@ -219,13 +247,24 @@ class MainWindow(QMainWindow):
         hint = QLabel("Drag to reorder the signal chain \u2014 earlier items are "
                       "applied first. Where OSD / TEXT sits decides whether the "
                       "text is degraded by the effects below it (tape vs player "
-                      "vs TV). Both the CPU render and the GPU preview follow this order.")
+                      "vs TV). Preview and render follow this order.")
         hint.setWordWrap(True); hint.setObjectName("SectionHint")
         chv.addWidget(hint)
         self.chain_list = ChainList(self.effects, self._reorder_chain,
                                     self._toggle_chain)
         chv.addWidget(self.chain_list, 1)
         self.tabs.addTab(chain_w, "SIGNAL CHAIN")
+        self.keyframes = KeyframeEditor(self.params, self.timeline, self.effects,
+                                        self.engine.current_time)
+        self.keyframes.changed.connect(self._keyframes_changed)
+        self.keyframes.seekRequested.connect(self._seek_keyframe)
+        self.keyframes.setMinimumHeight(300)
+        self.left_splitter.addWidget(self.keyframes)
+        self.left_splitter.setSizes([440, 440])
+        self._timeline_sizes = [440, 440]
+        for panel in [*self.panels, self.osd_panel]:
+            for row in panel.rows:
+                row.keyframeRequested.connect(self._add_parameter_key)
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
         right.addWidget(self.tabs)
@@ -233,6 +272,25 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
         self._wire_transport()
+
+    def _show_timeline(self, visible):
+        if not visible:
+            self._timeline_sizes = self.left_splitter.sizes()
+        self.keyframes.setVisible(visible)
+        if visible:
+            self.left_splitter.setSizes(self._timeline_sizes)
+
+    def _focus_timeline(self):
+        self.timeline_btn.setChecked(True)
+        self.keyframes.control.setFocus()
+
+    def _filter_panels(self, *_):
+        query = self.filter_search.text().strip().casefold()
+        for panel in self.panels:
+            effect = panel.effect
+            text = " ".join([effect.label, *[p.label for p in effect.own_params()]]).casefold()
+            panel.setVisible(query in text and
+                             (not self.active_only.isChecked() or effect.enabled_param().value >= .5))
 
     def _build_osd(self) -> QGroupBox:
         box = QGroupBox("OSD / TEXT")
@@ -256,6 +314,31 @@ class MainWindow(QMainWindow):
         r2.addWidget(QLabel("TAG")); r2.addWidget(self.corner_edit, 1)
         r2.addWidget(QLabel("CLOCK")); r2.addWidget(self.clock_cb)
         lay.addLayout(r2)
+        manual_row = QHBoxLayout()
+        self.manual_clock_cb = QCheckBox("MANUAL DATE / TIME")
+        self.manual_clock_cb.setChecked(self.text_effect.manual_clock)
+        self.manual_datetime_edit = QDateTimeEdit()
+        self.manual_datetime_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self.manual_datetime_edit.setCalendarPopup(True)
+        self.manual_datetime_edit.setDateTime(QDateTime.fromString(
+            self.text_effect.manual_datetime, Qt.ISODate))
+        self.clock_run_cb = QCheckBox("Advance with playback")
+        self.clock_run_cb.setChecked(self.text_effect.clock_run)
+        self.manual_datetime_edit.setEnabled(self.text_effect.manual_clock)
+        self.clock_run_cb.setEnabled(self.text_effect.manual_clock)
+        def manual_changed(on):
+            self.text_effect.manual_clock = on
+            self.manual_datetime_edit.setEnabled(on)
+            self.clock_run_cb.setEnabled(on)
+            if on and self.clock_cb.currentIndex() not in (2, 3, 4):
+                self.clock_cb.setCurrentIndex(4)
+        self.manual_clock_cb.toggled.connect(manual_changed)
+        self.manual_datetime_edit.dateTimeChanged.connect(lambda dt: setattr(
+            self.text_effect, "manual_datetime", dt.toString("yyyy-MM-ddTHH:mm:ss")))
+        self.clock_run_cb.toggled.connect(lambda on: setattr(self.text_effect, "clock_run", on))
+        for widget in (self.manual_clock_cb, self.manual_datetime_edit, self.clock_run_cb):
+            manual_row.addWidget(widget)
+        lay.addLayout(manual_row)
         r3 = QHBoxLayout()
         self.font_cb = QComboBox()
         self._fonts = self.text_effect.fonts()
@@ -326,9 +409,8 @@ class MainWindow(QMainWindow):
         t.loadClicked.connect(self._load)
         t.input_menu.aboutToShow.connect(self._populate_input_menu)
         t.output_menu.aboutToShow.connect(self._populate_output_menu)
-        t.gpu_btn.toggled.connect(self._toggle_gpu)
         t.playToggled.connect(self._toggle_play)
-        t.recToggled.connect(self._toggle_rec)
+        t.keyframeClicked.connect(self._focus_timeline)
         t.playbackToggled.connect(self._toggle_playback)
         t.scrubbed.connect(self._scrub)
         t.saveClicked.connect(self._save_session)
@@ -352,6 +434,7 @@ class MainWindow(QMainWindow):
         self.engine.pause()
         self.transport.play_btn.setChecked(False)
         self.transport.set_file()
+        self.keyframes.setEnabled(True)
         self.transport.set_position(0, self.engine.duration)
 
     # ---- input source picker -------------------------------------------
@@ -406,9 +489,9 @@ class MainWindow(QMainWindow):
         self.engine.set_mode(Mode.LIVE)
         self.engine.pause()
         self.transport.play_btn.setChecked(False)
-        self.transport.rec_btn.setChecked(False)
         self.transport.pb_btn.setChecked(False)
         self.transport.set_live(label)
+        self.keyframes.setEnabled(False)
 
     def _use_screen(self, bbox, label):
         try:
@@ -489,30 +572,6 @@ class MainWindow(QMainWindow):
             r = QAction("Record Processed Video\u2026", m)
         r.triggered.connect(self._toggle_record)
         m.addAction(r)
-
-    def _toggle_gpu(self, on):
-        if on:
-            from ..gpu.glrender import GLRenderer
-            ok, info = GLRenderer.available()
-            if not ok:
-                self.transport.gpu_btn.setChecked(False)
-                if "not installed" in info:
-                    hint = "\n\nInstall it with:  uv sync --extra gpu"
-                else:
-                    hint = ("\n\nThis isn't about how your monitors are wired "
-                            "(a dock is fine) - it means no off-screen GL "
-                            "context is available, which is common over Remote "
-                            "Desktop or on a headless session.")
-                QMessageBox.warning(self, "GPU preview",
-                                    "GPU acceleration is unavailable:\n\n"
-                                    f"{info}{hint}\n\nStaying on the CPU path.")
-                return
-            self.engine.set_gpu(True)
-            self.statusBar().showMessage(f"GPU preview on ({info}). Offline "
-                                         "RENDER still uses the exact CPU path.",
-                                         6000)
-        else:
-            self.engine.set_gpu(False)
 
     def _refresh_sink(self):
         active = self._vcam.enabled or self._recorder.active()
@@ -617,30 +676,45 @@ class MainWindow(QMainWindow):
             if self.audio_player:
                 self.audio_player.pause()
 
-    def _toggle_rec(self, on):
-        self.video.recording = on
-        if on:
-            # fresh take from current position
-            self.timeline.clear()
-            self.engine.set_mode(Mode.LIVE)
-            self.recorder.arm(True)
+    def _on_parameter_changed(self, pid, value):
+        if pid.endswith(".enabled"):
+            self._filter_panels()
+        # Auditioning a slider is never an instruction to write automation.
+        if self.transport.pb_btn.isChecked():
             self.transport.pb_btn.setChecked(False)
-        else:
-            self.recorder.arm(False)
+            self.statusBar().showMessage("Manual tweak: keyframe preview off. Use + KEY to save a keyframe.", 3500)
+
+    def _add_parameter_key(self, pid):
+        if not self.keyframes.isEnabled():
+            self.statusBar().showMessage("Load a video file to edit time-based keyframes.", 3000)
+            return
+        self.keyframes.control.setCurrentIndex(self.keyframes.control.findData(pid))
+        self.keyframes.add_key()
+        self._focus_timeline()
+
+    def _keyframes_changed(self):
+        if self.transport.pb_btn.isChecked():
+            self.params.reset_motion(self.timeline)
+        self.keyframes.refresh()
+
+    def _seek_keyframe(self, t):
+        self.transport.play_btn.setChecked(False)
+        self.engine.pause()
+        self.transport.pb_btn.setChecked(True)
+        self.engine.seek_seconds(t)
+        if self.audio_player:
+            self.audio_player.seek_seconds(t)
+        self.keyframes.set_playhead(t, self.engine.duration, self.engine.fps)
 
     def _toggle_playback(self, on):
         if on:
-            self.recorder.arm(False)
-            self.transport.rec_btn.setChecked(False)
-            self.video.recording = False
             self.engine.set_mode(Mode.PLAYBACK)
-            self.engine.seek_seconds(0)
-            if self.audio_player:
-                self.audio_player.seek_seconds(0)
         else:
             self.engine.set_mode(Mode.LIVE)
 
     def _render(self):
+        if getattr(self, "_worker", None) and self._worker.isRunning():
+            return
         if not self.source_path:
             QMessageBox.information(self, "Render", "Load a video first."); return
         out, _ = QFileDialog.getSaveFileName(
@@ -651,50 +725,103 @@ class MainWindow(QMainWindow):
         full = QMessageBox.question(
             self, "Render", "Full resolution? (No = preview width)") \
             == QMessageBox.Yes
-        max_w = None if full else C.PREVIEW_MAX_WIDTH
+        source_width = self.engine._source.width
+        max_w = None if full else self.engine._effective_width(source_width)
         self._dlg = QProgressDialog("Rendering\u2026", "Cancel", 0, 100, self)
         self._dlg.setWindowModality(Qt.WindowModal)
         self._worker = RenderWorker(self.source_path, out, self.params,
                                     self.timeline, self.effects, max_w)
         self._worker.progress.connect(lambda f: self._dlg.setValue(int(f * 100)))
+        self._dlg.setAutoClose(False)
+        self._dlg.canceled.connect(self._worker.requestInterruption)
         self._worker.done.connect(self._render_done)
-        self._worker.failed.connect(
-            lambda m: QMessageBox.critical(self, "Render failed", m))
+        self._worker.failed.connect(self._render_failed)
+        self._worker.cancelled.connect(self._render_cancelled)
+        self.transport.render_btn.setEnabled(False)
+        self._worker.finished.connect(lambda: self.transport.render_btn.setEnabled(bool(self.source_path)))
         self._worker.start()
 
     def _render_done(self, path):
-        self._dlg.setValue(100)
+        self._dlg.close()
         QMessageBox.information(self, "Render", f"Wrote:\n{path}")
+
+    def _render_failed(self, message):
+        self._dlg.close()
+        QMessageBox.critical(self, "Render failed", message)
+
+    def _render_cancelled(self):
+        self._dlg.close()
+        self.statusBar().showMessage("Render cancelled. Destination file unchanged.", 5000)
 
     def _save_session(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save take", "take.json", "Session (*.json)")
         if path:
             self.session.order = [e.id for e in self.effects]
-            self.session.save(path)
+            try:
+                self.session.save(path)
+            except (OSError, ValueError, TypeError) as error:
+                QMessageBox.warning(self, "Save take failed", str(error))
 
     def _open_session(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open take", "", "Session (*.json)")
         if not path:
             return
-        self.session.load(path)
+        self.engine.pause()
+        self.transport.play_btn.setChecked(False)
+        self.transport.pb_btn.setChecked(False)
+        try:
+            self.session.load(path)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            QMessageBox.warning(self, "Open take failed", str(error))
+            return
+        self.pipeline.request_reset()
+        self.keyframes.refresh(clear_history=True)
+        for widget, value in ((self.text_edit, self.text_effect.custom_text),
+                              (self.corner_edit, self.text_effect.corner_text)):
+            widget.setText(value)
+        self.clock_cb.setCurrentIndex(self.text_effect.clock_mode)
+        self.manual_clock_cb.blockSignals(True)
+        self.manual_clock_cb.setChecked(self.text_effect.manual_clock)
+        self.manual_clock_cb.blockSignals(False)
+        self.manual_datetime_edit.setEnabled(self.text_effect.manual_clock)
+        self.clock_run_cb.setEnabled(self.text_effect.manual_clock)
+        self.manual_datetime_edit.setDateTime(QDateTime.fromString(
+            self.text_effect.manual_datetime, Qt.ISODate))
+        self.clock_run_cb.setChecked(self.text_effect.clock_run)
+        font_name = next((n for n, p in self._fonts.items()
+                          if p == self.text_effect.font_path), None)
+        if font_name:
+            self.font_cb.setCurrentText(font_name)
         if self.session.order:
             self._reorder_chain(self.session.order)
             self.chain_list.rebuild(self.effects)
+        if self.session.source_path and not os.path.exists(self.session.source_path):
+            replacement, _ = QFileDialog.getOpenFileName(
+                self, "Locate missing take video: " + os.path.basename(self.session.source_path),
+                "", "Video (*.mp4 *.mov *.avi *.mkv)")
+            if replacement:
+                self.session.source_path = replacement
+            else:
+                QMessageBox.warning(self, "Take video missing",
+                    "Loaded the controls and keys only. The current input is unchanged; load a video before exporting this take.")
         if self.session.source_path and os.path.exists(self.session.source_path):
             try:
                 self.engine.set_source(FileSource(self.session.source_path))
                 self._make_audio(self.session.source_path)
                 self.source_path = self.session.source_path
-            except Exception:  # noqa: BLE001
-                pass
+                self.transport.set_file()
+                self.keyframes.setEnabled(True)
+            except Exception as error:  # noqa: BLE001
+                QMessageBox.warning(self, "Take video failed", str(error))
         self._sync_panels(force=True)
 
     # --------------------------------------------------------------- signals
     def _on_position(self, t, index):
         self.transport.set_position(t, self.engine.duration)
         self.meter.set_levels(levels_at(t))
+        self.keyframes.set_playhead(t, self.engine.duration, self.engine.fps)
 
     def _on_finished(self):
         self.transport.play_btn.setChecked(False)
@@ -707,8 +834,23 @@ class MainWindow(QMainWindow):
         for p in self.panels:
             p.refresh()
         self.osd_panel.refresh()
+        self._filter_panels()
 
     # --------------------------------------------------------------- close
     def closeEvent(self, e):
+        worker = getattr(self, "_worker", None)
+        if worker and worker.isRunning():
+            worker.requestInterruption()
+            self.statusBar().showMessage("Stopping export; close again when it finishes.", 5000)
+            e.ignore()
+            return
         self.engine.stop()
+        if self.engine.isRunning():
+            self.statusBar().showMessage("Finishing the current frame; close again in a moment.", 3000)
+            e.ignore()
+            return
+        if self.audio_player:
+            self.audio_player.stop()
+        self._vcam.stop()
+        self._recorder.stop()
         super().closeEvent(e)

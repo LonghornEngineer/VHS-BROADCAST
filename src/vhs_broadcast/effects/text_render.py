@@ -229,38 +229,3 @@ def draw_texts(frame_bgr: np.ndarray, items, font_path: str) -> np.ndarray:
         out[fy0:fy1, fx0:fx1] = (region * (1 - a) + rgb * a).astype(np.uint8)
 
     return out
-
-
-def render_osd_overlay(h: int, w: int, items, font_path: str) -> np.ndarray:
-    """Render OSD items to a transparent RGBA overlay (RGB order, for GPU use).
-    Lets the OSD sit at its chain position as its own GPU compositing pass."""
-    canvas = np.zeros((h, w, 4), np.float32)
-    if items and font_path:
-        for it in items:
-            text = it.get("text", "")
-            if not text:
-                continue
-            size = max(6, int(it.get("size_px", 24)))
-            color = tuple(it.get("color", (235, 235, 235)))
-            glow_q = round(float(it.get("glow", 0.0)), 2)
-            arr, total, margin = _render_tile(text, size, glow_q, color, font_path)
-            if arr is None or total <= 0:
-                continue
-            th, tw = arr.shape[:2]
-            x = int(it["x"]); y = int(it["y"])
-            x0 = x - total - margin if it.get("anchor") == "ra" else x - margin
-            y0 = y - margin
-            fx0, fy0 = max(0, x0), max(0, y0)
-            fx1, fy1 = min(w, x0 + tw), min(h, y0 + th)
-            if fx1 <= fx0 or fy1 <= fy0:
-                continue
-            sub = arr[fy0 - y0:fy1 - y0, fx0 - x0:fx1 - x0].astype(np.float32)
-            sa = sub[..., 3:4] / 255.0
-            dst = canvas[fy0:fy1, fx0:fx1]
-            da = dst[..., 3:4] / 255.0
-            out_a = sa + da * (1 - sa)
-            rgb = sub[..., :3] * sa + dst[..., :3] * da * (1 - sa)
-            safe = np.where(out_a > 1e-6, out_a, 1.0)
-            dst[..., :3] = rgb / safe
-            dst[..., 3:4] = out_a * 255.0
-    return canvas.astype(np.uint8)

@@ -9,7 +9,7 @@ STYLESHEET = f"""
     font-size: 12px;
     color: {C.TEXT};
 }}
-QMainWindow, QWidget#Root {{
+QMainWindow, QWidget#Root, QWidget#KeyframeEditor {{
     background-color: {C.BG};
 }}
 QLabel {{ color: {C.TEXT}; }}
@@ -97,6 +97,11 @@ QToolTip {{ background: {C.PANEL}; color: {C.GREEN}; border: 1px solid {C.BORDER
 
 /* --- fixes: transparent scroll area (no white bg) + compact controls --- */
 QScrollArea {{ background: transparent; border: none; }}
+QScrollBar:horizontal {{ background: {C.BG}; height: 12px; }}
+QScrollBar:vertical {{ background: {C.BG}; width: 12px; }}
+QScrollBar::handle {{ background: {C.GREEN_DIM}; min-width: 20px; min-height: 20px; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0px; height: 0px; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: {C.PANEL}; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QComboBox {{
     background-color: {C.PANEL_HI}; color: {C.GREEN};
@@ -221,8 +226,8 @@ QSlider#Scrub::groove:horizontal {{ height: 8px; background: #0a1a0c; border: 1p
 QSlider#Scrub::sub-page:horizontal {{ background: {C.GREEN_DIM}; border: 1px solid {C.BORDER}; border-radius: 3px; }}
 QSlider#Scrub::handle:horizontal {{ background: {C.GREEN}; width: 12px; margin: -5px 0; border-radius: 3px; }}
 
-QSpinBox {{ background: {C.BG}; color: {C.TEXT}; border: 1px solid {C.BORDER}; padding: 2px 4px; }}
-QSpinBox::up-button, QSpinBox::down-button {{ background: {C.PANEL_HI}; width: 14px; border: 1px solid {C.BORDER}; }}
-QSpinBox::up-arrow {{ image: none; width:0;height:0; border-left:3px solid transparent; border-right:3px solid transparent; border-bottom:5px solid {C.GREEN}; }}
-QSpinBox::down-arrow {{ image: none; width:0;height:0; border-left:3px solid transparent; border-right:3px solid transparent; border-top:5px solid {C.GREEN}; }}
+QSpinBox, QDoubleSpinBox, QDateTimeEdit {{ background: {C.BG}; color: {C.TEXT}; border: 1px solid {C.BORDER}; padding: 2px 4px; }}
+QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button, QDateTimeEdit::up-button, QDateTimeEdit::down-button {{ background: {C.PANEL_HI}; width: 14px; border: 1px solid {C.BORDER}; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow, QDateTimeEdit::up-arrow {{ image: none; width:0;height:0; border-left:3px solid transparent; border-right:3px solid transparent; border-bottom:5px solid {C.GREEN}; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow, QDateTimeEdit::down-arrow {{ image: none; width:0;height:0; border-left:3px solid transparent; border-right:3px solid transparent; border-top:5px solid {C.GREEN}; }}
 """

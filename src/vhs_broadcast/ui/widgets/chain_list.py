@@ -3,7 +3,7 @@
 Shows every effect in processing order (OSD/TEXT included as a movable item),
 with a checkbox for enabled state. Dragging reorders the chain; where OSD/TEXT
 sits decides whether the text is degraded by the effects after it. Reordering
-applies to the CPU render path; the GPU preview uses the standard chain order.
+applies to both preview and offline render.
 """
 from __future__ import annotations
 

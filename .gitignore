@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.qa-*.png
+.vhs-render-*/
+dist/
+src/vhs_broadcast/assets/fonts/VCR*.ttf

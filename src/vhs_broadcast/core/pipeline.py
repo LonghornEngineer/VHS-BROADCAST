@@ -16,9 +16,24 @@ class Pipeline:
 
     def __init__(self, effects: list[Effect]) -> None:
         self.effects = effects
+        self._reset_requested = False
+        self._order = ()
+
+    def request_reset(self):
+        self._reset_requested = True
 
     def process(self, frame: np.ndarray, t: float) -> np.ndarray:
+        order = tuple(id(e) for e in self.effects)
+        if self._reset_requested or order != self._order:
+            for eff in self.effects:
+                eff.reset_state()
+            self._order = order
+            self._reset_requested = False
+        original = frame.copy() if any(e.requires_source and e.enabled_param().evaluate(t) >= .5
+                                       for e in self.effects) else None
         for eff in self.effects:
+            if eff.requires_source:
+                eff.source_frame = original
             frame = eff.apply(frame, t)
         return frame
 
@@ -99,9 +114,8 @@ class _AvFileSource(VideoSource):
         for dt in pref:
             try:
                 hw = HWAccel(device_type=dt, allow_software_fallback=False)
-                c = av.open(path, hwaccel=hw)
-                next(c.decode(c.streams.video[0]))   # prove it really decodes
-                c.close()
+                with av.open(path, hwaccel=hw) as c:
+                    next(c.decode(c.streams.video[0]))   # prove it really decodes
                 return dt
             except Exception:  # noqa: BLE001
                 continue
@@ -319,6 +333,10 @@ def scale_to_width(frame: np.ndarray, max_w: int,
     return cv2.resize(frame, (max_w, int(h * scale)), interpolation=interp)
 
 
+class RenderCancelled(Exception):
+    """The user stopped an export before its destination was replaced."""
+
+
 def render_to_file(
     source_path: str,
     output_path: str,
@@ -329,6 +347,62 @@ def render_to_file(
     max_width: Optional[int] = None,
     with_audio: bool = True,
     progress=None,
+    cancelled=None,
+) -> str:
+    """Render an isolated control snapshot with fresh motion history."""
+    from copy import copy
+    from dataclasses import replace
+    from contextlib import ExitStack
+    from pathlib import Path
+    import os
+    import tempfile
+    from . import audio_react
+    render_params = ParameterSet()
+    for param in params.all():
+        render_params.add(replace(param, mod=replace(param.mod),
+                                  audio=replace(param.audio), on_change=None))
+    render_effects = []
+    for effect in effects:
+        cloned = copy(effect)
+        cloned.params = render_params
+        cloned._enabled = render_params.get(effect.enabled_param().id)
+        cloned._own = [render_params.get(p.id) for p in effect.own_params()]
+        cloned.reset_state()
+        render_effects.append(cloned)
+    analysis = audio_react.current()
+    try:
+        if cancelled and cancelled():
+            raise RenderCancelled()
+        if Path(source_path).resolve() == Path(output_path).resolve():
+            raise ValueError("Choose a different file for the export; the source cannot be overwritten.")
+        # Keep the destination intact on cancellation/failure, including audio muxing.
+        with tempfile.TemporaryDirectory(prefix=".vhs-render-", dir=Path(output_path).resolve().parent) as folder:
+            staged = str(Path(folder) / "output.mp4")
+            with ExitStack() as resources:
+                _render_to_file(source_path, staged, render_params,
+                                Timeline.from_dict(timeline.as_dict()), render_effects,
+                                max_width=max_width, with_audio=with_audio,
+                                progress=progress, cancelled=cancelled, resources=resources)
+            if cancelled and cancelled():
+                raise RenderCancelled()
+            os.replace(staged, output_path)
+        return output_path
+    finally:
+        audio_react.set_analysis(analysis)
+
+
+def _render_to_file(
+    source_path: str,
+    output_path: str,
+    params: ParameterSet,
+    timeline: Timeline,
+    effects: list[Effect],
+    *,
+    max_width: Optional[int] = None,
+    with_audio: bool = True,
+    progress=None,
+    cancelled=None,
+    resources=None,
 ) -> str:
     """Deterministically re-render the take to a new video file.
 
@@ -345,11 +419,13 @@ def render_to_file(
     from .motor import motor_affects_audio, motor_enabled, motor_speed
 
     src = FileSource(source_path, read_ahead=False)
+    resources.callback(src.release)
     pipeline = Pipeline(effects)
+    params.reset_motion(timeline)
     fps = src.fps or 30.0
 
     # install audio-reactive analysis for this clip (restored afterwards) so the
-    # render matches the preview bit-for-bit
+    # export uses the same audio controls as preview
     prev_analysis = audio_react.set_analysis(
         audio_react.build_analysis(source_path, fps, src.frame_count))
 
@@ -373,14 +449,14 @@ def render_to_file(
     video_target = output_path
     tmp_video = None
     if audio is not None:
-        fd, tmp_video = tempfile.mkstemp(suffix=".mp4")
+        fd, tmp_video = tempfile.mkstemp(suffix=".mp4", dir=os.path.dirname(output_path))
         os.close(fd)
         video_target = tmp_video
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(video_target, fourcc, fps, (w, h))
+    resources.callback(writer.release)
     if not writer.isOpened():
-        src.release()
         raise IOError(f"cannot open writer: {video_target}")
 
     src.seek_frame(0)
@@ -388,13 +464,28 @@ def render_to_file(
     out_index = 0
     src_pos = 0.0
     total = src.frame_count or 0
+    downsample = next((effect for effect in effects if effect.id == "downsample"), None)
+    held_frame = None
+    held_bucket = None
     try:
         while frame is not None:
+            if cancelled and cancelled():
+                raise RenderCancelled()
             t = out_index / fps
             work = (scale_to_width(frame, max_width, cv2.INTER_AREA)
                     if max_width else frame)
             timeline.apply(t, params)
-            writer.write(pipeline.process(work.copy(), t))
+            processed = pipeline.process(work.copy(), t)
+            # Match the preview engine's FPS-hold stage after all effects.
+            fraction = params.get("downsample.fps").evaluate(t) / 100 if downsample else 1
+            if downsample and downsample.enabled_param().evaluate(t) >= .5 and fraction < .999:
+                bucket = int(t * max(1, fps * fraction))
+                if held_frame is None or held_bucket != bucket:
+                    held_frame, held_bucket = processed.copy(), bucket
+                processed = held_frame
+            else:
+                held_frame, held_bucket = None, None
+            writer.write(processed)
             out_index += 1
 
             # advance the (warped) source read head
@@ -412,9 +503,10 @@ def render_to_file(
                 progress(min(1.0, src.index / total))
     finally:
         writer.release()
-        src.release()
 
     # mux audio if we have it
+    if cancelled and cancelled():
+        raise RenderCancelled()
     if audio is not None:
         samples, sr = audio
         ok = audio_mod.mux_audio_into_video(video_target, samples, sr,

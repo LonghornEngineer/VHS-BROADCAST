@@ -11,13 +11,15 @@ Bands:
   high  ~2k-16k Hz   (hats / cymbals)
   level full-band RMS (overall loudness)
 
-Each band is normalised to ~[0,1] against its own loud percentile, and kept in
-two smoothings (fast = snappy, slow = gentle); the per-parameter SMOOTH control
-lerps between them.
+Spectral ranges share one loudness reference. Causal FFT power supports custom
+cutoffs without decoding again. Threshold gates and linear attack/release ramps
+are cached by settings and sampled by time, so seeking never changes the result.
+The two smoothed envelopes remain available for older gain-based takes.
 """
 from __future__ import annotations
 
 from typing import Optional
+from functools import lru_cache
 
 import numpy as np
 
@@ -48,25 +50,28 @@ class AudioAnalysis:
         self.fps = float(fps)
         self.n = max(1, int(n_frames))
         win = 2048
-        hop = max(1, int(round(sr / max(1.0, fps))))
         window = np.hanning(win).astype(np.float32)
         freqs = np.fft.rfftfreq(win, 1.0 / sr)
+        self.freqs = freqs
+        self.power = np.zeros((self.n, len(freqs)), np.float32)
         band_bins = {b: np.where((freqs >= lo) & (freqs < hi))[0]
                      for b, (lo, hi) in _BAND_HZ.items()}
 
         raw = {b: np.zeros(self.n, np.float32) for b in BANDS}
-        total = mono.shape[0]
         for f in range(self.n):
-            centre = int(f * hop)
-            start = max(0, centre - win // 2)
-            seg = mono[start:start + win]
+            centre = int(round(f * sr / self.fps))
+            start = centre - win
+            seg = mono[max(0, start):max(0, centre)]
+            if start < 0:
+                seg = np.pad(seg, (-start, 0))
             if seg.shape[0] < win:
                 seg = np.pad(seg, (0, win - seg.shape[0]))
-            raw["level"][f] = float(np.sqrt(np.mean(seg * seg)) + 1e-9)
+            raw["level"][f] = float(np.sqrt(np.mean(seg * seg)))
             spec = np.abs(np.fft.rfft(seg * window))
+            self.power[f] = spec ** 2
             for b in ("low", "mid", "high"):
                 bins = band_bins[b]
-                raw[b][f] = float(np.sqrt(np.mean(spec[bins] ** 2)) + 1e-9) \
+                raw[b][f] = float(np.sqrt(np.mean(spec[bins] ** 2))) \
                     if bins.size else 0.0
 
         # normalise: the 3 spectral bands share one reference so a quiet band
@@ -75,6 +80,11 @@ class AudioAnalysis:
         spec_vals = np.concatenate([raw["low"], raw["mid"], raw["high"]])
         spec_ref = np.percentile(spec_vals, 97) or (spec_vals.max() or 1.0)
         lvl_ref = np.percentile(raw["level"], 97) or (raw["level"].max() or 1.0)
+        self.spec_ref = float(spec_ref)
+        self.level = np.clip(raw["level"] / max(float(lvl_ref), 1e-9), 0, 1)
+        # Instance-local bounded caches: changing settings never retains old clips.
+        self.filtered = lru_cache(maxsize=16)(self._filtered)
+        self.trigger = lru_cache(maxsize=32)(self._trigger)
         refs = {"low": spec_ref, "mid": spec_ref, "high": spec_ref,
                 "level": lvl_ref}
         self.fast = {}
@@ -83,6 +93,36 @@ class AudioAnalysis:
             v = np.clip(raw[b] / (refs[b] + 1e-9), 0.0, 1.3)
             self.fast[b] = _one_pole(v, 0.5)
             self.slow[b] = _one_pole(v, 0.08)
+
+    def _filtered(self, band, low_hz, high_hz):
+        if band == "level":
+            return self.level
+        bins = (self.freqs >= low_hz) & (self.freqs < high_hz)
+        if not bins.any() or low_hz >= high_hz:
+            return np.zeros(self.n, np.float32)
+        energy = np.sqrt(self.power[:, bins].mean(axis=1))
+        return np.clip(energy / max(self.spec_ref, 1e-9), 0, 1)
+
+    def _trigger(self, band, low_hz, high_hz, threshold, ramp):
+        level = self.filtered(band, low_hz, high_hz)
+        active = (level > 0) & (level >= threshold)
+        if ramp <= 0:
+            return active.astype(np.float32)
+        result = np.empty(self.n, np.float32)
+        value = 0.0
+        step = 1.0 / max(1.0, ramp * self.fps)
+        for i, on in enumerate(active):
+            value = min(1.0, value + step) if on else max(0.0, value - step)
+            result[i] = value
+        return result
+
+    def selected_level(self, band, t, low_hz, high_hz):
+        i = min(self.n - 1, max(0, int(t * self.fps)))
+        return float(self.filtered(band, low_hz, high_hz)[i])
+
+    def activation(self, band, t, low_hz, high_hz, threshold, ramp):
+        i = min(self.n - 1, max(0, int(t * self.fps)))
+        return float(self.trigger(band, low_hz, high_hz, threshold, ramp)[i])
 
     def sample(self, band: str, t: float, smooth: float) -> float:
         arrf = self.fast.get(band)
@@ -119,7 +159,10 @@ def current() -> Optional[AudioAnalysis]:
     return _ANALYSIS
 
 
-def _provider(band: str, t: float, smooth: float) -> float:
+def _provider(band: str, t: float, smooth: float, low_hz=None, high_hz=None,
+              threshold=0.35, ramp=0.15) -> float:
+    if _ANALYSIS and low_hz is not None:
+        return _ANALYSIS.activation(band, t, low_hz, high_hz, threshold, ramp)
     return _ANALYSIS.sample(band, t, smooth) if _ANALYSIS else 0.0
 
 
@@ -127,7 +170,8 @@ def levels_at(t: float, smooth: float = 0.25) -> dict:
     """For the on-screen meter."""
     if _ANALYSIS is None:
         return {b: 0.0 for b in BANDS}
-    return {b: _ANALYSIS.sample(b, t, smooth) for b in BANDS}
+    return {b: _ANALYSIS.selected_level(b, t, *_BAND_HZ.get(b, (0, 20000)))
+            for b in BANDS}
 
 
 def build_analysis(audio_path: str, fps: float, n_frames: int

@@ -22,6 +22,15 @@ class Effect:
     id: str = "effect"
     #: human label for the UI panel
     label: str = "Effect"
+    requires_source = False
+
+    def reset_state(self):
+        """Clear temporal history when loading, seeking or reordering."""
+
+    def choice(self, name, label, choices, default=0):
+        p = self.param(name, label, default, 0, len(choices) - 1, step=1)
+        p.choices = tuple(choices)
+        return p
 
     def __init__(self, params: ParameterSet) -> None:
         self.params = params

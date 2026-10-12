@@ -4,8 +4,8 @@
 VCR OSD Mono (by Riciery Leal) is the classic on-screen-display face from old
 VCRs, and looks great for the OSD/clock overlay. It is a THIRD-PARTY font with
 its own license (listed as free on dafont -- see the page below), so it is NOT
-bundled with this project. The run script offers to fetch it on first launch;
-you can also run this directly. It drops the .ttf into
+bundled with this project. Run this script explicitly to install a local copy.
+It drops the .ttf into
 src/vhs_broadcast/assets/fonts/ and the app picks it up in the FONT dropdown
 automatically (it also becomes the default OSD font).
 

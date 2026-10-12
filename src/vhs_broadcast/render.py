@@ -27,8 +27,13 @@ def main(argv=None) -> int:
     params = ParameterSet()
     effects = default_effects(params)
     timeline = Timeline()
-    session = Session(params, timeline)
+    session = Session(params, timeline, effects)
     session.load(args.session)
+    if session.order:
+        by_id = {e.id: e for e in effects}
+        ordered = list(dict.fromkeys(session.order))
+        effects = [by_id[k] for k in ordered if k in by_id] + [
+            e for e in effects if e.id not in ordered]
 
     source = args.input or session.source_path
     if not source:

@@ -51,5 +51,5 @@ class AudioMeter(QWidget):
                 grad.setColorAt(1.0, QColor(C.AMBER if self._active else "#3a6a3a"))
                 p.fillRect(int(x), 1 + int(bar_h) - fh, int(bw), fh, grad)
             p.setPen(QColor(C.TEXT_DIM))
-            p.drawText(int(x), h - 1, name)
+            p.drawText(int(x), h - 1, f"{name} {val * 100:.0f}%")
         p.end()

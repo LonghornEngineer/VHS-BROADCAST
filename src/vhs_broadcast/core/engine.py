@@ -1,8 +1,8 @@
 """PlaybackEngine: a QThread that decodes, warps, processes and emits frames.
 
 Modes:
-  * LIVE     -- user drives controls; the Recorder captures changes.
-  * PLAYBACK -- the Timeline drives parameter base values from the recording.
+  * LIVE     -- freely audition controls without writing automation.
+  * PLAYBACK -- the Timeline drives parameter base values from manual keyframes.
 
 Fixes/behaviours:
   * While PAUSED the current source frame is re-processed every tick, so OSD
@@ -66,11 +66,6 @@ class PlaybackEngine(QThread):
         self._av_offset = 0.0      # seconds; manual A/V sync trim
         self._shown = -1           # last rendered output index (audio-master)
         self._frame_sink = None    # optional callable(bgr) for virtual cam / rec
-        self._use_gpu = False
-        self._gl = None            # lazily created in the engine thread
-        self._text_eff = next(
-            (e for e in getattr(pipeline, "effects", [])
-             if getattr(e, "id", None) == "text"), None)
         self._downsample_eff = next(
             (e for e in getattr(pipeline, "effects", [])
              if getattr(e, "id", None) == "downsample"), None)
@@ -102,7 +97,7 @@ class PlaybackEngine(QThread):
 
     def set_preview_width(self, w: int):
         """Cap the preview/processing width (0 = full source resolution).
-        Lower = faster on CPU; higher is where the GPU backend pays off."""
+        Lower resolutions process faster."""
         self._preview_w = int(w) or 0
 
     def set_preview_scale(self, frac: float):
@@ -121,7 +116,7 @@ class PlaybackEngine(QThread):
         total = self._frames_shown + self._frames_dropped
         return {
             "fps": self._fps,
-            "backend": "GPU" if (self._use_gpu and self._gl is not None) else "CPU",
+            "backend": "CPU",
             "desync_ms": self._desync * 1000.0,
             "width": self._proc_size[0],
             "height": self._proc_size[1],
@@ -130,29 +125,6 @@ class PlaybackEngine(QThread):
             "drop_pct": (self._frames_dropped / total * 100.0) if total else 0.0,
             "decode": getattr(self._source, "decoder", "?") if self._source else "?",
         }
-
-    def set_gpu(self, on: bool):
-        """Enable the GPU live-preview backend (CPU stays the offline renderer)."""
-        self._use_gpu = bool(on)
-
-    def _gpu_process(self, work, t):
-        try:
-            if self._gl is None:
-                from ..gpu.glrender import GLRenderer
-                self._gl = GLRenderer()
-            order = [e.id for e in self.pipeline.effects]
-            osd_items = None
-            font = None
-            if (self._text_eff is not None
-                    and self._text_eff.enabled_param().value >= 0.5):
-                h, w = work.shape[:2]
-                osd_items = self._text_eff.build_items(t, w, h)
-                font = self._text_eff.font_path
-            return self._gl.render_chain(work, self.params, t, order,
-                                         osd_items, font)
-        except Exception:  # noqa: BLE001 -> never let GPU break playback
-            self._use_gpu = False
-            return self.pipeline.process(work.copy(), t)
 
     def set_frame_sink(self, fn):
         """Install a callable that receives each new processed BGR frame (for
@@ -192,6 +164,8 @@ class PlaybackEngine(QThread):
             if self._source:
                 self._source.release()
             self._source = source
+            self.pipeline.request_reset()
+            self.params.reset_motion(self.timeline if self._mode == Mode.PLAYBACK else None)
             self._out_index = 0
             self._src_pos = 0.0
             self._seek_to = 0
@@ -210,12 +184,17 @@ class PlaybackEngine(QThread):
 
     # ---- transport --------------------------------------------------------
     def set_mode(self, mode: Mode):
+        if mode != self._mode:
+            if mode == Mode.PLAYBACK:
+                self.params.reset_motion(self.timeline)
+            else:
+                self.params.resume_live_motion()
         self._mode = mode
 
     def _fps_downsample(self, frame, t):
         """Hold the last output frame within an FPS bucket, so the content
         updates at a reduced rate (temporal 'downsample the FPS'). Driven by the
-        downsample effect's FPS% param; works on both CPU and GPU paths."""
+        downsample effect's FPS% param; applies to the processed frame."""
         ds = self._downsample_eff
         if ds is None or ds.enabled_param().value < 0.5:
             return frame
@@ -282,6 +261,7 @@ class PlaybackEngine(QThread):
                 src = self._source
                 did_seek = False
                 if src is not None and self._seek_to is not None:
+                    self.pipeline.request_reset()
                     idx = max(0, min(self._seek_to, max(0, src.frame_count - 1)))
                     src.seek_frame(idx)
                     self._out_index = idx
@@ -388,10 +368,7 @@ class PlaybackEngine(QThread):
                     self.recorder.set_time(t)
                     if self._mode == Mode.PLAYBACK:
                         self.timeline.apply(t, self.params)
-                    if self._use_gpu:
-                        processed = self._gpu_process(work, t)
-                    else:
-                        processed = self.pipeline.process(work.copy(), t)
+                    processed = self.pipeline.process(work.copy(), t)
                     processed = self._fps_downsample(processed, t)
                     self._last_frame = processed
                     self._shown = self._out_index
@@ -445,9 +422,6 @@ class PlaybackEngine(QThread):
         with QMutexLocker(self._mutex):
             if self._source:
                 self._source.release()
-            if self._gl is not None:
-                self._gl.release()
-                self._gl = None
         if _winmm is not None:
             try:
                 _winmm.timeEndPeriod(1)

@@ -15,7 +15,7 @@ class VideoView(QWidget):
         self.recording = False
         self.preview_off = False
         self._blink = False
-        self.setMinimumSize(480, 320)
+        self.setMinimumSize(400, 180)
         self.setAutoFillBackground(True)
         t = QTimer(self)
         t.timeout.connect(self._tick)
