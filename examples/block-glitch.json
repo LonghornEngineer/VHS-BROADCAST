@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["block_corrupt"],
+  "parameters": {
+    "text.enabled": 0,
+    "block_corrupt.enabled": 1,
+    "block_corrupt.mode": 3,
+    "block_corrupt.block": 32,
+    "block_corrupt.pool": 6,
+    "block_corrupt.lock": 1,
+    "block_corrupt.density": 0
+  },
+  "timeline": {
+    "tracks": {
+      "block_corrupt.density": {
+        "t": [0, 2, 4, 6],
+        "v": [0, 0.1, 0.65, 0],
+        "interpolation": "smooth"
+      }
+    }
+  }
+}
