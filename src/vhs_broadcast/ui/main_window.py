@@ -339,6 +339,20 @@ class MainWindow(QMainWindow):
         for widget in (self.manual_clock_cb, self.manual_datetime_edit, self.clock_run_cb):
             manual_row.addWidget(widget)
         lay.addLayout(manual_row)
+        # Text keys: snapshot LABEL / TAG / CLOCK / date at the playhead; each holds until the next.
+        keys_row = QHBoxLayout()
+        self.text_keys_cb = QComboBox()
+        self.text_keys_cb.setToolTip("Text keys hold until the next key. Select one to jump to it.")
+        self.text_keys_cb.activated.connect(self._seek_text_key)
+        self.text_key_btn = QPushButton("KEY TEXT AT PLAYHEAD")
+        self.text_key_btn.setToolTip("Save the current LABEL, TAG, CLOCK and date at the playhead")
+        self.text_key_btn.clicked.connect(self._add_text_key)
+        self.text_key_del_btn = QPushButton("DELETE")
+        self.text_key_del_btn.clicked.connect(self._delete_text_key)
+        keys_row.addWidget(QLabel("TEXT KEYS")); keys_row.addWidget(self.text_keys_cb, 1)
+        keys_row.addWidget(self.text_key_btn); keys_row.addWidget(self.text_key_del_btn)
+        lay.addLayout(keys_row)
+        self._refresh_text_keys()
         r3 = QHBoxLayout()
         self.font_cb = QComboBox()
         self._fonts = self.text_effect.fonts()
@@ -392,6 +406,40 @@ class MainWindow(QMainWindow):
     def _insert_glyph(self, glyph: str):
         self.text_edit.insert(glyph)   # insert at cursor in the LABEL field
         self.text_edit.setFocus()
+
+    def _refresh_text_keys(self, select_t=None):
+        cb = self.text_keys_cb
+        cb.clear()
+        for key in self.text_effect.text_keys:
+            parts = [key[f] for f in ("custom_text", "corner_text") if key.get(f)]
+            if "manual_datetime" in key:
+                parts.append(key["manual_datetime"].replace("T", " "))
+            m, s = divmod(key["t"], 60)
+            cb.addItem(f"{int(m)}:{s:05.2f}  " + " | ".join(parts), key["t"])
+            if select_t is not None and abs(key["t"] - select_t) < 1e-6:
+                cb.setCurrentIndex(cb.count() - 1)
+        if not cb.count():
+            cb.addItem("(none: settings apply to the whole video)", None)
+        self.text_key_del_btn.setEnabled(bool(self.text_effect.text_keys))
+
+    def _add_text_key(self):
+        t = round(self.engine.current_time(), 3)
+        e = self.text_effect
+        e.set_text_key(t, custom_text=e.custom_text, corner_text=e.corner_text,
+                       clock_mode=e.clock_mode, manual_datetime=e.manual_datetime)
+        self._refresh_text_keys(select_t=t)
+
+    def _delete_text_key(self):
+        t = self.text_keys_cb.currentData()
+        if t is None:
+            return
+        self.text_effect.text_keys = [k for k in self.text_effect.text_keys if abs(k["t"] - t) > 1e-6]
+        self._refresh_text_keys()
+
+    def _seek_text_key(self, index):
+        t = self.text_keys_cb.itemData(index)
+        if t is not None and self.engine.duration:
+            self._scrub(min(1.0, t / self.engine.duration))
 
     def _on_font(self, name: str):
         path = self._fonts.get(name)
@@ -790,6 +838,7 @@ class MainWindow(QMainWindow):
         self.manual_datetime_edit.setDateTime(QDateTime.fromString(
             self.text_effect.manual_datetime, Qt.ISODate))
         self.clock_run_cb.setChecked(self.text_effect.clock_run)
+        self._refresh_text_keys()
         font_name = next((n for n, p in self._fonts.items()
                           if p == self.text_effect.font_path), None)
         if font_name:

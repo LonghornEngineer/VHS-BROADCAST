@@ -78,6 +78,28 @@ example `text` contains text, clock and font settings, and `luma_key` stores a
 background image reference. Paths refer to local files, so review untrusted specs
 before executing them. Media isn't bundled inside takes.
 
+### Changing OSD text over time
+
+`text.text_keys` changes the OSD text partway through a video. Each key is an object
+with `t` (seconds, nonnegative) plus any of `custom_text`, `corner_text`,
+`clock_mode` (0–5) and `manual_datetime`. A key holds until the next key; fields it
+omits keep their earlier value, and before the first key the base settings apply.
+With `manual_clock` and `clock_run` on, a keyed date counts up from its own key time.
+
+```json
+{
+  "effect_settings": {
+    "text": {
+      "manual_clock": true, "clock_mode": 3, "manual_datetime": "1987-03-14T15:42:00",
+      "text_keys": [
+        {"t": 164.4, "manual_datetime": "1997-03-14T19:20:00"},
+        {"t": 276.0, "manual_datetime": "2026-03-14T18:05:00", "corner_text": ""}
+      ]
+    }
+  }
+}
+```
+
 ## Results and errors
 
 Successful commands write one JSON object to stdout:
