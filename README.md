@@ -70,6 +70,17 @@ keys stay intact. **RENDER always applies the take's keys**, even if preview is 
 Double-click a numeric slider to restore its default; this does not delete keys
 or disable its audio/LFO modulation. Live capture has no seekable keyframe timeline.
 
+### Changing OSD text partway through
+
+Text isn't a slider, so it uses **TEXT KEYS** in **OSD / TEXT** instead of the timeline.
+Set **LABEL**, **TAG**, **CLOCK** and the manual date the way you want them, move the
+playhead, and click **KEY TEXT AT PLAYHEAD**. That snapshot holds until the next text
+key; before the first key the fields' own values apply. Pick a key from the list to
+jump to it, or **DELETE** it. To change a key, set the fields again and key the same
+spot. With **Advance with playback** on, a keyed date counts up from its key time,
+so a camcorder date can jump years between scenes. Text keys are saved in the take
+and always apply, in preview and render.
+
 ## Takes: save, reopen and reuse a project
 
 A **take** is a `.json` project file containing the instructions for your look.

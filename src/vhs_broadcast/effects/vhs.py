@@ -423,6 +423,10 @@ class TextOverlayEffect(Effect):
     CLOCK_DATETIME = 4
     CLOCK_TIMER = 5
 
+    # Settings a text key may change. A key holds until the next key (like HOLD
+    # interpolation); fields it omits keep their earlier value.
+    KEYED_FIELDS = ("custom_text", "corner_text", "clock_mode", "manual_datetime")
+
     def __init__(self, params):
         self.custom_text = "PLAY \u25b6"
         self.corner_text = "SP"
@@ -431,6 +435,7 @@ class TextOverlayEffect(Effect):
         self.manual_clock = False
         self.manual_datetime = "1994-01-01T12:00:00"
         self.clock_run = True
+        self.text_keys = []           # [{"t": seconds, <KEYED_FIELDS subset>}], sorted by t
         super().__init__(params)
         self.enabled_param().set_base(1.0, notify=False)  # OSD on by default
         self.enabled_param().default = 1.0
@@ -445,9 +450,35 @@ class TextOverlayEffect(Effect):
         return available_fonts()
 
     def settings(self):
-        return {k: getattr(self, k) for k in (
+        data = {k: getattr(self, k) for k in (
             "custom_text", "corner_text", "clock_mode", "font_path",
             "manual_clock", "manual_datetime", "clock_run")}
+        data["text_keys"] = [dict(key) for key in self.text_keys]
+        return data
+
+    @classmethod
+    def normalize_text_keys(cls, keys):
+        """Validate text keys and return them sorted; a later key at the same time wins."""
+        from datetime import datetime
+        if not isinstance(keys, list):
+            raise ValueError("text.text_keys must be a list")
+        by_time = {}
+        for key in keys:
+            if not isinstance(key, dict) or "t" not in key or set(key) - {"t", *cls.KEYED_FIELDS}:
+                raise ValueError(f"text.text_keys: each key needs 't' plus any of {list(cls.KEYED_FIELDS)}")
+            t = key["t"]
+            if isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t) or t < 0:
+                raise ValueError("text.text_keys: 't' must be a nonnegative number of seconds")
+            for field in ("custom_text", "corner_text", "manual_datetime"):
+                if field in key and not isinstance(key[field], str):
+                    raise ValueError(f"text.text_keys: {field} must be text")
+            if "manual_datetime" in key:
+                datetime.fromisoformat(key["manual_datetime"])
+            if "clock_mode" in key and (isinstance(key["clock_mode"], bool) or
+                                        key["clock_mode"] not in range(cls.CLOCK_NONE, cls.CLOCK_TIMER + 1)):
+                raise ValueError("text.text_keys: clock_mode must be an integer in [0, 5]")
+            by_time[float(t)] = {**key, "t": float(t)}
+        return [by_time[t] for t in sorted(by_time)]
 
     def restore_settings(self, data):
         from datetime import datetime
@@ -458,26 +489,48 @@ class TextOverlayEffect(Effect):
                         datetime.fromisoformat(data[k])
                     except (ValueError, TypeError):
                         continue
+                if k == "text_keys":
+                    self.text_keys = self.normalize_text_keys(data[k])
+                    continue
                 setattr(self, k, data[k])
+
+    def set_text_key(self, t, **fields):
+        """Add or replace the key at time t (seconds)."""
+        self.text_keys = self.normalize_text_keys(
+            [k for k in self.text_keys if abs(k["t"] - t) > 1e-6] + [{"t": t, **fields}])
+
+    def state_at(self, t):
+        """Text settings in effect at time t, plus the time the shown date was keyed."""
+        state = {f: getattr(self, f) for f in self.KEYED_FIELDS}
+        date_anchor = 0.0
+        for key in self.text_keys:
+            if key["t"] > t:
+                break
+            state.update({f: key[f] for f in self.KEYED_FIELDS if f in key})
+            if "manual_datetime" in key:
+                date_anchor = key["t"]
+        return state, date_anchor
 
     def build_items(self, t, w, h):
         g = lambda k: self.params.get(f"text.{k}").evaluate(t)  # noqa: E731
         scale, x, y, glow = g("scale"), g("x"), g("y"), g("glow")
         base = int(48 * scale * (w / 720.0))
+        state, date_anchor = self.state_at(t)
         items = []
-        if self.custom_text:
-            items.append(dict(text=self.custom_text, x=int(x * w) + 8,
+        if state["custom_text"]:
+            items.append(dict(text=state["custom_text"], x=int(x * w) + 8,
                               y=int(y * h), size_px=base, glow=glow,
                               anchor="la"))
         clk = None
         show = True
-        m = self.clock_mode
+        m = state["clock_mode"]
         from datetime import datetime, timedelta
         now = datetime.now()
         if self.manual_clock:
-            now = datetime.fromisoformat(self.manual_datetime)
+            now = datetime.fromisoformat(state["manual_datetime"])
             if self.clock_run:
-                now += timedelta(seconds=max(0.0, t))
+                # a keyed date starts counting from its own key time
+                now += timedelta(seconds=max(0.0, t - date_anchor))
         if m == self.CLOCK_BLINK:
             clk = "12:00"
             show = (int(t * 1.5) % 2 == 0)      # blink ~0.75 Hz (deterministic)
@@ -492,8 +545,8 @@ class TextOverlayEffect(Effect):
         if clk and show:
             items.append(dict(text=clk, x=int(w * 0.97), y=int(h * 0.06),
                               size_px=base, glow=glow, anchor="ra"))
-        if self.corner_text:
-            items.append(dict(text=self.corner_text, x=int(w * 0.03),
+        if state["corner_text"]:
+            items.append(dict(text=state["corner_text"], x=int(w * 0.03),
                               y=int(h * 0.06), size_px=int(base * 0.8),
                               glow=glow, anchor="la"))
         return items
