@@ -1,6 +1,6 @@
 [project]
 name = "vhs-broadcast"
-version = "0.1.0"
+version = "0.2.0"
 description = "Retro broadcast-deck VHS effect studio with manual keyframes and audio-reactive controls."
 readme = "README.md"
 requires-python = ">=3.10"

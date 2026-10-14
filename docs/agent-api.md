@@ -86,6 +86,11 @@ with `t` (seconds, nonnegative) plus any of `custom_text`, `corner_text`,
 omits keep their earlier value, and before the first key the base settings apply.
 With `manual_clock` and `clock_run` on, a keyed date counts up from its own key time.
 
+OSD positions are normal parameters and accept keyframe tracks: `text.x` / `text.y`
+(label, left-anchored), `text.clock_x` / `text.clock_y` (clock, right-anchored;
+defaults 0.97 / 0.06) and `text.tag_x` / `text.tag_y` (tag, left-anchored; defaults
+0.03 / 0.06). Values are fractions of frame width and height.
+
 ```json
 {
   "effect_settings": {
