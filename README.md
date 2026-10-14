@@ -81,6 +81,11 @@ spot. With **Advance with playback** on, a keyed date counts up from its key tim
 so a camcorder date can jump years between scenes. Text keys are saved in the take
 and always apply, in preview and render.
 
+The clock and **TAG** each have their own **X / Y** sliders (**Clock X/Y**, **Tag X/Y**)
+next to the label's **Pos X/Y**. They're ordinary controls, so they can be keyframed:
+for example, keep the date inside a 4:3 area and slide it out to the corner when the
+picture opens to 16:9. The clock is anchored by its right edge, the tag by its left.
+
 ## Takes: save, reopen and reuse a project
 
 A **take** is a `.json` project file containing the instructions for your look.

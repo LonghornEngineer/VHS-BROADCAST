@@ -445,6 +445,11 @@ class TextOverlayEffect(Effect):
         self.param("x", "Pos X", 0.05, 0.0, 1.0)
         self.param("y", "Pos Y", 0.85, 0.0, 1.0)
         self.param("glow", "Glow", 0.4, 0.0, 1.0)
+        # Clock is right-anchored, tag left-anchored; defaults match the original fixed layout.
+        self.param("clock_x", "Clock X", 0.97, 0.0, 1.0)
+        self.param("clock_y", "Clock Y", 0.06, 0.0, 1.0)
+        self.param("tag_x", "Tag X", 0.03, 0.0, 1.0)
+        self.param("tag_y", "Tag Y", 0.06, 0.0, 1.0)
 
     def fonts(self):
         return available_fonts()
@@ -543,11 +548,11 @@ class TextOverlayEffect(Effect):
         elif m == self.CLOCK_TIMER:
             clk = f"{int(t // 60):02d}:{int(t % 60):02d}:{int((t * 100) % 100):02d}"
         if clk and show:
-            items.append(dict(text=clk, x=int(w * 0.97), y=int(h * 0.06),
+            items.append(dict(text=clk, x=round(w * g("clock_x")), y=round(h * g("clock_y")),
                               size_px=base, glow=glow, anchor="ra"))
         if state["corner_text"]:
-            items.append(dict(text=state["corner_text"], x=int(w * 0.03),
-                              y=int(h * 0.06), size_px=int(base * 0.8),
+            items.append(dict(text=state["corner_text"], x=round(w * g("tag_x")),
+                              y=round(h * g("tag_y")), size_px=int(base * 0.8),
                               glow=glow, anchor="la"))
         return items
 
