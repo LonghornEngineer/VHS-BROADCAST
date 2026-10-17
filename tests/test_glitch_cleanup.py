@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from vhs_broadcast.core.automation import Session, Timeline
 from vhs_broadcast.core.parameters import ParameterSet
 from vhs_broadcast.core.pipeline import RenderCancelled, render_to_file
-from vhs_broadcast.effects.glitch import RasterHoldEffect, RollingShutterEffect
+from vhs_broadcast.effects.glitch import RasterHoldEffect, RollingShutterEffect, SyncLossEffect
 
 
 class GlitchTests(unittest.TestCase):
@@ -84,6 +84,35 @@ class GlitchTests(unittest.TestCase):
         effect.enabled_param().set_base(0)
         effect.apply(frame, .2)
         self.assertFalse(effect._pending)
+
+    def test_sync_loss_is_repeatable_and_preserves_input(self):
+        p, effect = self.make(SyncLossEffect, rate=10)
+        frame = np.random.default_rng(3).integers(0, 256, (48, 64, 3), dtype=np.uint8)
+        saved = frame.copy()
+        out = effect.apply(frame, .25)
+        self.assertEqual((out.shape, out.dtype), (frame.shape, np.uint8))
+        np.testing.assert_array_equal(frame, saved)
+        np.testing.assert_array_equal(effect.apply(frame, .25), out)
+        p.get("sync_loss.amount").set_base(0)
+        np.testing.assert_array_equal(effect.apply(frame, .3), frame)
+
+    def test_sync_loss_bursts_smear_whole_lines_and_quantize(self):
+        p, effect = self.make(SyncLossEffect, burst=1, smear=1, split=0, dropout=0,
+                              freeze=0, crush=0, dither=0, bits=1, rate=0)
+        frame = np.random.default_rng(5).integers(0, 256, (60, 80, 3), dtype=np.uint8)
+        out = effect.apply(frame, 0)
+        self.assertTrue(set(np.unique(out)) <= {0, 255})
+        flat = np.mean(np.all(out == out[:, :1], axis=(1, 2)))
+        self.assertGreater(flat, .4)
+
+    def test_sync_loss_freeze_holds_the_first_frame_of_a_tick(self):
+        p, effect = self.make(SyncLossEffect, freeze=1, burst=0, smear=0, dropout=0,
+                              crush=0, bits=8, rate=1)
+        first = np.full((20, 20, 3), 40, np.uint8)
+        second = np.full_like(first, 200)
+        held = effect.apply(first, .1)
+        np.testing.assert_array_equal(effect.apply(second, .2), held)
+        self.assertFalse(np.array_equal(effect.apply(second, 1.2), held))
 
 
 class RenderSafetyTests(unittest.TestCase):
