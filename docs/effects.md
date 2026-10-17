@@ -12,6 +12,7 @@
 | Phosphor Persistence | Highlight trails with separate R/G/B half-life seconds, threshold and strength. |
 | CRT Geometry / Mask | Curved tube geometry, rounded corners, RGB triads or aperture grille, mask pitch and strength. |
 | RF / Hum Bars | Structured moving dark bands and herringbone patterns; frequency, angle, drift, width and intensity. |
+| Line Dither | Draws the picture as thin parallel lines that bend sideways with brightness, so contours ripple through the line set; only areas above Threshold get lines. Spacing, line width, bend, weight by light (brighter = thicker), smoothing, vertical/horizontal lines, colour (source, white, periwinkle, green, amber), background level and drift. Try `examples/line-dither.json`. |
 | Luma Key / Threshold | Silhouette, stepped bands or keyed compositing; threshold, softness, levels, invert, and black/white/tint/original-feed/background-image fills. |
 
 All are reorderable and disabled initially. Numeric controls retain audio/LFO

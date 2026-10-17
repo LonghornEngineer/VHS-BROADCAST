@@ -14,7 +14,7 @@ from vhs_broadcast.effects.advanced import (
     ADVANCED_EFFECTS, TemporalEffect, VideoFeedbackEffect, MotionSmearEffect,
     CompositeEffect, PaletteDitherEffect, TemporalDisplacementEffect,
     BlockCorruptionEffect, PhosphorPersistenceEffect, CRTGeometryEffect,
-    RFInterferenceEffect, LumaKeyEffect,
+    RFInterferenceEffect, LumaKeyEffect, LineDitherEffect,
 )
 
 
@@ -24,6 +24,26 @@ class AdvancedEffectsTests(unittest.TestCase):
         e = kind(p)
         e.enabled_param().set_base(1)
         return p, e
+
+    def test_line_dither_spaces_bends_and_masks_lines(self):
+        p, e = self.make(LineDitherEffect)
+        for name, value in dict(spacing=8, thickness=1, bend=0, smooth=0, weight=0, color=1).items():
+            p.get("line_dither." + name).set_base(value)
+        bright = np.full((24, 40, 3), 200, np.uint8)
+        out = e.apply(bright, 0)
+        columns = np.flatnonzero(out[0, :, 0] > 128)
+        np.testing.assert_array_equal(columns, np.arange(0, 40, 8))
+        self.assertTrue((out == out[:1]).all())
+        self.assertEqual(int(e.apply(np.zeros_like(bright), 0).max()), 0)
+        p.get("line_dither.bend").set_base(4)
+        shifted = np.flatnonzero(e.apply(bright, 0)[0, :, 0] > 128)
+        self.assertFalse(np.array_equal(shifted, columns))
+        p.get("line_dither.bend").set_base(0)
+        p.get("line_dither.direction").set_base(1)
+        rows = np.flatnonzero(e.apply(bright, 0)[:, 0, 0] > 128)
+        np.testing.assert_array_equal(rows, np.arange(0, 24, 8))
+        p.get("line_dither.amount").set_base(0)
+        np.testing.assert_array_equal(e.apply(bright, 0), bright)
 
     def test_every_effect_shape_type_no_input_mutation_and_pause(self):
         frames = [np.random.default_rng(i).integers(0, 256, (48, 64, 3), np.uint8) for i in range(3)]
