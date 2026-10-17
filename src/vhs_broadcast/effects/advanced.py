@@ -559,6 +559,8 @@ class LineDitherEffect(Effect):
         self.choice("color", "Color", ("Source", "White", "Periwinkle", "Green", "Amber"), 2)
         self.param("background", "Background", 0)
         self.param("drift", "Drift px/s", 0, -60, 60)
+        self.choice("follow", "Follow", ("Off", "Leading edge", "Trailing edge", "Outline"), 1)
+        self.param("count", "Lines from edge", 0, 0, 200, step=1)
 
     def process(self, frame, t, v):
         if v["amount"] <= 0:
@@ -571,12 +573,17 @@ class LineDitherEffect(Effect):
             luma = cv2.GaussianBlur(luma, (0, 0), v["smooth"])
         spacing = max(2.0, float(round(v["spacing"])))
         drift = self.params.motion_phase("line_dither.drift", t)
-        # Brightness pushes each line sideways, so contours bend the whole set.
-        phase = np.arange(w, dtype=np.float32)[None, :] - luma * v["bend"] - drift
+        inside = luma >= v["threshold"]
+        offset = self._edge_offset(inside, int(v["follow"]))
+        # Lines sit at fixed steps in from the subject's edge, so each one echoes
+        # the outline; brightness then pushes them sideways on top of that.
+        phase = offset - luma * v["bend"] - drift
         distance = np.abs((phase + spacing / 2) % spacing - spacing / 2)
         width = v["thickness"] * (1 - v["weight"] + v["weight"] * luma)
         line = np.clip(width / 2 + .5 - distance, 0, 1)
         lit = np.clip((luma - v["threshold"]) / .05 + .5, 0, 1)
+        if v["count"] >= 1 and int(v["follow"]):
+            line *= offset < (round(v["count"]) - .5) * spacing
         mask = (line * lit)[..., None]
         index = int(v["color"])
         ink = source.astype(np.float32) if index == 0 else self.COLORS[index]
@@ -585,6 +592,22 @@ class LineDitherEffect(Effect):
         if horizontal:
             out = np.ascontiguousarray(out.transpose(1, 0, 2))
         return cv2.addWeighted(frame, 1 - v["amount"], out, v["amount"], 0)
+
+    @staticmethod
+    def _edge_offset(inside, follow):
+        """Distance in px from the subject's edge that each line is measured from."""
+        h, w = inside.shape
+        x = np.broadcast_to(np.arange(w, dtype=np.float32), (h, w))
+        if follow == 0:
+            return x
+        if follow == 3:
+            return np.maximum(0, cv2.distanceTransform(inside.astype(np.uint8), cv2.DIST_L2, 5) - 1)
+        if follow == 2:
+            return LineDitherEffect._edge_offset(inside[:, ::-1], 1)[:, ::-1]
+        # Leading edge: distance since the run of lit pixels began on this row,
+        # zero on the edge pixel so the first line traces the outline itself.
+        last_off = np.maximum.accumulate(np.where(inside, -1, np.arange(w)), axis=1)
+        return (x - last_off - 1).astype(np.float32)
 
 
 ADVANCED_EFFECTS = (VideoFeedbackEffect, MotionSmearEffect, CompositeEffect,

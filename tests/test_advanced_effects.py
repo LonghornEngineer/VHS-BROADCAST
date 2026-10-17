@@ -27,7 +27,7 @@ class AdvancedEffectsTests(unittest.TestCase):
 
     def test_line_dither_spaces_bends_and_masks_lines(self):
         p, e = self.make(LineDitherEffect)
-        for name, value in dict(spacing=8, thickness=1, bend=0, smooth=0, weight=0, color=1).items():
+        for name, value in dict(spacing=8, thickness=1, bend=0, smooth=0, weight=0, color=1, follow=0).items():
             p.get("line_dither." + name).set_base(value)
         bright = np.full((24, 40, 3), 200, np.uint8)
         out = e.apply(bright, 0)
@@ -44,6 +44,26 @@ class AdvancedEffectsTests(unittest.TestCase):
         np.testing.assert_array_equal(rows, np.arange(0, 24, 8))
         p.get("line_dither.amount").set_base(0)
         np.testing.assert_array_equal(e.apply(bright, 0), bright)
+
+    def test_line_dither_lines_echo_the_subject_edge(self):
+        p, e = self.make(LineDitherEffect)
+        for name, value in dict(spacing=6, thickness=1, bend=0, smooth=0, weight=0, color=1, threshold=.5).items():
+            p.get("line_dither." + name).set_base(value)
+        frame = np.zeros((20, 60, 3), np.uint8)
+        for y in range(20):
+            frame[y, 10 + y:] = 220  # leading edge slants one px per row
+        out = e.apply(frame, 0)[..., 0] > 128
+        for y in (0, 7, 19):
+            np.testing.assert_array_equal(np.flatnonzero(out[y]), np.arange(10 + y, 60, 6))
+        p.get("line_dither.count").set_base(2)
+        first = np.flatnonzero(e.apply(frame, 0)[3, :, 0] > 128)
+        np.testing.assert_array_equal(first, [13, 19])
+        p.get("line_dither.count").set_base(0)
+        p.get("line_dither.follow").set_base(2)
+        trailing = e.apply(frame, 0)[..., 0] > 128
+        np.testing.assert_array_equal(trailing[0, 29:], trailing[19, 29:])  # both rows lit from x=29
+        p.get("line_dither.follow").set_base(3)
+        self.assertTrue((e.apply(frame, 0)[..., 0] > 128).any())
 
     def test_every_effect_shape_type_no_input_mutation_and_pause(self):
         frames = [np.random.default_rng(i).integers(0, 256, (48, 64, 3), np.uint8) for i in range(3)]
