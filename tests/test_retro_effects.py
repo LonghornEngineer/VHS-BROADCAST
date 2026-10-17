@@ -9,7 +9,7 @@ import numpy as np
 from vhs_broadcast.core.parameters import ParameterSet
 from vhs_broadcast.core.automation import Session, Timeline
 from vhs_broadcast.core.pipeline import render_to_file
-from vhs_broadcast.effects.retro import GameBoyEffect, NESCorruptionEffect, RGBTortureEffect
+from vhs_broadcast.effects.retro import GameBoyEffect, LEDMatrixEffect, NESCorruptionEffect, RGBTortureEffect
 from vhs_broadcast.effects.advanced import MotionSmearEffect, BlockCorruptionEffect
 from vhs_broadcast.effects.vhs import PixelSortEffect, default_effects
 
@@ -28,7 +28,7 @@ class RetroEffectsTests(unittest.TestCase):
         self.assertEqual(len({e.id for e in effects}), len(effects))
         image = np.random.default_rng(2).integers(0, 256, (25, 37, 3), dtype=np.uint8)
         original = image.copy()
-        for cls in (GameBoyEffect, NESCorruptionEffect, RGBTortureEffect):
+        for cls in (GameBoyEffect, LEDMatrixEffect, NESCorruptionEffect, RGBTortureEffect):
             with self.subTest(effect=cls.id):
                 p, e = self.make(cls)
                 for i in range(4):
@@ -72,6 +72,29 @@ class RetroEffectsTests(unittest.TestCase):
         plain = e.apply(white, .2)
         p.get("gameboy.grid").set_base(.5)
         self.assertLess(e.apply(white, .2).mean(), plain.mean())
+
+    def test_led_matrix_draws_round_dots_on_a_pitch_grid(self):
+        p, e = self.make(LEDMatrixEffect, pitch=8, glow=0, unlit=0, threshold=.5)
+        white = np.full((32, 48, 3), 255, np.uint8)
+        out = e.apply(white, 0)
+        np.testing.assert_array_equal(out, e.apply(white, 3))
+        cell = out[:8, :8].max(axis=2)
+        self.assertGreater(cell[4, 4], 200)
+        self.assertLess(cell[0, 0], 30)
+        np.testing.assert_array_equal(out[:8, :8], out[8:16, 16:24])
+        dark = e.apply(np.zeros_like(white), 0)
+        self.assertLess(int(dark.max()), 30)
+        p.get("led_matrix.invert").set_base(1)
+        np.testing.assert_array_equal(e.apply(np.zeros_like(white), 0), out)
+        p.get("led_matrix.invert").set_base(0)
+        grey = np.full_like(white, 100)
+        self.assertLess(int(e.apply(grey, 0).max()), 30)
+        p.get("led_matrix.levels").set_base(4)
+        p.get("led_matrix.threshold").set_base(0)
+        mid = e.apply(grey, 0)[4, 4].max()
+        self.assertTrue(30 < mid < 220)
+        p.get("led_matrix.amount").set_base(0)
+        np.testing.assert_array_equal(e.apply(grey, 0), grey)
 
     def test_rgb_identity_routing_wrapped_offsets_and_quantization(self):
         p, e = self.make(RGBTortureEffect)

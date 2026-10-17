@@ -20,6 +20,12 @@ keyframes. Resetting or tweaking a control does not automatically create keys.
 
 ### Handheld and console glitches
 
+- **LED MATRIX**: redraws the picture as a dot-matrix LED sign. Each cell of
+  **LED px** becomes one round LED; **Threshold** decides which LEDs light (two
+  **Levels** is pure on/off, more levels give dimmable LEDs above the threshold).
+  **Dot size**, **Glow** and **Unlit LEDs** shape the panel, **Color** picks cool
+  white, amber, red, green or blue, and **Invert** lights the dark areas instead.
+  Try `examples/led-matrix.json`.
 - **GAME BOY / POCKET VIDEO**: reduces the picture to a logical pixel grid and
   four brightness-indexed colors, then enlarges it without smoothing. Classic
   Green, Pocket Gray, Cream / Plum and Blue / Mint palettes are included. Choose
