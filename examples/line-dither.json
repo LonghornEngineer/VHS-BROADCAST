@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "source": null,
+  "order": [
+    "line_dither"
+  ],
+  "parameters": {
+    "text.enabled": 0,
+    "line_dither.enabled": 1,
+    "line_dither.spacing": 6,
+    "line_dither.bend": 4,
+    "line_dither.threshold": 0.25,
+    "line_dither.follow": 1,
+    "line_dither.color": 2
+  },
+  "timeline": {
+    "tracks": {
+      "line_dither.count": {
+        "t": [
+          0,
+          5,
+          10
+        ],
+        "v": [
+          1,
+          40,
+          40
+        ],
+        "interpolation": "linear"
+      }
+    }
+  }
+}
