@@ -1,4 +1,4 @@
-"""CPU retro-console looks and independent RGB channel processing."""
+"""CPU retro-console looks, LED matrix panels and independent RGB channel processing."""
 from __future__ import annotations
 
 import cv2
@@ -66,6 +66,62 @@ class GameBoyEffect(TemporalEffect):
                 lines[:-1] |= (y[:-1] != y[1:])[:, None]
             picture = _u8(picture * (1 - lines[..., None] * v["grid"]))
         return cv2.addWeighted(frame, 1 - v["amount"], picture, v["amount"], 0), {"gray": gray.copy()}
+
+
+class LEDMatrixEffect(Effect):
+    """A dot-matrix LED sign: thresholded cells drawn as round glowing LEDs."""
+    id = "led_matrix"
+    label = "LED MATRIX"
+    # BGR LED colours.
+    COLORS = np.array([[255, 238, 222], [40, 170, 255], [40, 40, 255],
+                       [90, 255, 90], [255, 140, 40]], np.float32) / 255
+    PANEL = np.array([18, 5, 4], np.float32) / 255
+
+    def build(self, params):
+        self.param("amount", "Mix", 1)
+        self.param("pitch", "LED px", 8, 3, 32, step=1)
+        self.param("threshold", "Threshold", .45)
+        self.param("levels", "Levels", 2, 2, 16, step=1)
+        self.param("dot", "Dot size", .75, .3, 1)
+        self.param("glow", "Glow", .9, 0, 2)
+        self.param("unlit", "Unlit LEDs", .05, 0, .5)
+        self.choice("color", "Color", ("Cool White", "Amber", "Red", "Green", "Blue"))
+        self.param("invert", "Invert", 0, 0, 1, step=1)
+
+    def process(self, frame, t, v):
+        if v["amount"] <= 0:
+            return frame
+        h, w = frame.shape[:2]
+        pitch = max(3, int(round(v["pitch"])))
+        cols, rows = max(1, -(-w // pitch)), max(1, -(-h // pitch))
+        luma = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        cells = cv2.resize(luma, (cols, rows), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+        if v["invert"] >= .5:
+            cells = 1 - cells
+        steps = int(round(v["levels"])) - 1
+        if steps <= 1:
+            cells = (cells >= v["threshold"]).astype(np.float32)
+        else:
+            # Levels above two keep the threshold as the black point.
+            cells = np.clip((cells - v["threshold"]) / max(1e-3, 1 - v["threshold"]), 0, 1)
+            cells = np.round(cells * steps) / steps
+        cells = v["unlit"] + (1 - v["unlit"]) * cells
+        lit = np.repeat(np.repeat(cells, pitch, 0), pitch, 1)[:h, :w]
+        out = lit * np.tile(self._dot(pitch, v["dot"]), (rows, cols))[:h, :w]
+        if v["glow"] > 0:
+            out = out + cv2.GaussianBlur(out, (0, 0), pitch * .9) * v["glow"]
+        color = self.COLORS[int(v["color"])]
+        # Unlit panel reads as dark navy rather than pure black.
+        out = np.clip(np.maximum(out[..., None] * color, self.PANEL), 0, 1)
+        out = _u8(out * 255)
+        return cv2.addWeighted(frame, 1 - v["amount"], out, v["amount"], 0)
+
+    @staticmethod
+    def _dot(pitch, size):
+        """Soft round LED: bright core falling off to the dot edge."""
+        centre = (np.arange(pitch, dtype=np.float32) + .5 - pitch / 2) / (pitch / 2)
+        radius = np.hypot(centre[:, None], centre[None, :]) / max(.05, size)
+        return np.clip(1 - radius ** 3, 0, 1)
 
 
 class RGBTortureEffect(Effect):

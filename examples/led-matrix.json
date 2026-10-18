@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["led_matrix"],
+  "parameters": {
+    "text.enabled": 0,
+    "led_matrix.enabled": 1,
+    "led_matrix.pitch": 8,
+    "led_matrix.glow": 0.9
+  },
+  "timeline": {
+    "tracks": {
+      "led_matrix.threshold": {
+        "t": [0, 4, 7, 10],
+        "v": [0.55, 0.35, 0.35, 0.55],
+        "interpolation": "smooth"
+      }
+    }
+  }
+}
