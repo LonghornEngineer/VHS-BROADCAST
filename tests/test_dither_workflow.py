@@ -30,7 +30,7 @@ class DitherWorkflowTests(unittest.TestCase):
 
     def test_every_pattern_palette_scale_stays_in_palette_and_repeatable(self):
         saved = self.image.copy()
-        for palette in range(9):
+        for palette in range(12):
             colors = self.effect.colors({"palette": palette, "colors": 8}).clip(0, 255).astype(np.uint8)
             valid = {tuple(c) for c in colors}
             for mode in range(8):
@@ -85,6 +85,31 @@ class DitherWorkflowTests(unittest.TestCase):
         gapped = self.effect.apply(self.image, 0)
         self.assertTrue((gapped[3::4] == 0).all() and (gapped[:, 3::4] == 0).all())
         np.testing.assert_array_equal(gapped[:3, :3], still[:3, :3])
+
+    def test_luma_matching_blocks_grade_and_multi_hue_palettes(self):
+        self.set(palette=10, colors=32, mode=0, space=1)
+        field = self.effect.colors({"palette": 10, "colors": 32}).astype(np.uint8)
+        self.assertEqual(len(field), 20)
+        self.assertEqual(len(self.effect.colors({"palette": 4, "colors": 32})), 16)
+        for colour in field[[0, 7, 19]]:
+            flat = np.broadcast_to(colour, self.image.shape).copy()
+            np.testing.assert_array_equal(self.effect.apply(flat, 0), flat)
+        self.set(mode=3, scale=4, blocks=1)
+        plain = self.effect.apply(self.image, 0)
+        valid = {tuple(c) for c in field}
+        self.assertTrue(all(tuple(c) in valid for c in plain.reshape(-1, 3)))
+        self.set(mode=0)
+        blocky = self.effect.apply(self.image, 0)
+        for y in range(0, 24, 4):
+            for x in range(0, 40, 4):
+                self.assertEqual(len(np.unique(blocky[y:y + 4, x:x + 4].reshape(-1, 3), axis=0)), 1)
+        self.set(mode=3, grade=2, curve=.5)
+        graded = self.effect.apply(self.image, 0)
+        self.assertFalse(np.array_equal(graded, plain))
+        # Grading recolours matched entries index for index, so regions keep their shape.
+        _, before = np.unique(plain.reshape(-1, 3), axis=0, return_inverse=True)
+        _, after = np.unique(graded.reshape(-1, 3), axis=0, return_inverse=True)
+        self.assertEqual(len(set(zip(before.ravel(), after.ravel()))), len(set(before.ravel())))
 
     def test_zero_dither_tones_and_tiny_frames(self):
         self.set(amount=0)

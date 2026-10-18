@@ -203,8 +203,9 @@ class PaletteDitherEffect(Effect):
 
     def build(self, params):
         self.choice("palette", "Palette", ("Grayscale", "Green CRT", "Amber CRT", "CGA", "EGA",
-                                               "Handheld", "Sepia", "Ice", "Purple"), 4)
-        self.param("colors", "Colors", 8, 2, 16, step=1)
+                                               "Handheld", "Sepia", "Ice", "Purple",
+                                               "Riso Pop", "Field", "Dusk"), 4)
+        self.param("colors", "Colors", 8, 2, 32, step=1)
         # Append modes: existing take/keyframe indices must keep their meanings.
         self.choice("mode", "Dither", ("None", "Bayer 4x4", "Noise", "Bayer 2x2",
                                           "Bayer 8x8", "Clustered Dots", "Horizontal Lines",
@@ -219,10 +220,39 @@ class PaletteDitherEffect(Effect):
         self.param("shimmer", "Shimmer", 0)
         self.param("shimmer_speed", "Shimmer Hz", 2, 0, 12)
         self.param("gap", "LED Gap", 0)
+        self.choice("space", "Match", ("RGB", "Luma"))
+        self.param("blocks", "Block average", 0, 0, 1, step=1)
+        self.choice("grade", "Grade", ("None", "Instant", "Slide", "Faded", "Night"))
+        self.param("curve", "S-curve", 0)
+
+    # Multi-hue palettes (RGB), designed for photographic footage.
+    MULTI_RGB = (
+        # Riso Pop: inks, their overprints and tints on cream paper.
+        [[24, 22, 38], [250, 244, 228], [255, 92, 150], [40, 110, 200], [255, 214, 70],
+         [0, 160, 150], [120, 70, 160], [240, 120, 70], [70, 150, 90], [255, 170, 200],
+         [150, 190, 235], [255, 236, 160], [140, 210, 200], [60, 60, 110], [150, 50, 90],
+         [200, 200, 190]],
+        # Field: neutrals, earth, skin, foliage and sky for everyday scenes.
+        [[18, 20, 24], [52, 48, 56], [96, 92, 96], [160, 156, 150], [236, 232, 220],
+         [70, 40, 32], [140, 74, 48], [196, 120, 80], [232, 180, 140], [170, 120, 90],
+         [40, 64, 36], [78, 112, 52], [140, 166, 80], [220, 200, 120], [30, 52, 90],
+         [64, 110, 170], [150, 190, 220], [90, 150, 150], [160, 60, 70], [230, 150, 60]],
+        # Dusk: violet night through sunset oranges to pale sky.
+        [[16, 12, 30], [44, 24, 64], [84, 36, 96], [140, 48, 110], [200, 70, 110],
+         [240, 110, 100], [255, 170, 110], [255, 226, 160], [30, 40, 90], [40, 80, 140],
+         [60, 140, 180], [120, 200, 210], [210, 240, 230], [90, 30, 60], [170, 100, 170],
+         [250, 250, 240]],
+    )
 
     def colors(self, v):
         count = int(round(v["colors"]))
         mode = int(v["palette"])
+        if mode >= 9:
+            rgb = np.array(self.MULTI_RGB[mode - 9], np.float32)
+            # Fewer colours keep an even spread from dark to light.
+            rgb = rgb[np.argsort(rgb @ [.299, .587, .114], kind="stable")]
+            return rgb[np.linspace(0, len(rgb) - 1, min(count, len(rgb))).round().astype(int), ::-1]
+        count = min(count, 16)
         if mode < 3:
             tint = ([255, 255, 255], [60, 255, 95], [20, 185, 255])[mode]
             return np.linspace(0, 1, count)[:, None] * np.array(tint)[None, :]
@@ -270,23 +300,63 @@ class PaletteDitherEffect(Effect):
         else:
             noise = np.zeros((h, w), np.float32)
         palette = _u8(self.colors(v)).astype(np.float32)
-        strength = v["amount"] * 255 / max(1, math.sqrt(len(palette)))
+        paint = self._grade(palette, int(v["grade"]), v["curve"])
+        luma = int(v["space"]) == 1
+        # Luma matching dithers brightness only, so a fixed swing suits any palette size.
+        strength = v["amount"] * (96 if luma else 255 / max(1, math.sqrt(len(palette))))
         if v["shimmer"] > 0:
             noise = noise + self._shimmer(t, v, x, y, scale) * v["shimmer"] / max(.05, v["amount"])
+        if v["blocks"] >= .5 and scale > 1:
+            small = cv2.resize(frame, (-(-w // scale), -(-h // scale)), interpolation=cv2.INTER_AREA)
+            frame = np.repeat(np.repeat(small, scale, 0), scale, 1)[:h, :w]
+        if luma:
+            target = cv2.cvtColor(palette[None] / 255, cv2.COLOR_BGR2YCrCb)[0] * 255
         out = np.empty_like(frame)
         for start in range(0, h, 32):
             pixels = frame[start:start + 32].astype(np.float32)
             if v["gamma"] != 1:
                 pixels = 255 * np.power(pixels / 255, 1 / v["gamma"])
-            pixels += v["bias"] * 255 + noise[start:start + 32, :, None] * strength
-            flat = pixels.reshape(-1, 3)
-            distance = (flat * flat).sum(1)[:, None] - 2 * flat @ palette.T + (palette * palette).sum(1)
-            out[start:start + 32] = palette[distance.argmin(1)].reshape(pixels.shape).astype(np.uint8)
+            dither = noise[start:start + 32, :, None] * strength
+            if luma:
+                pixels = cv2.cvtColor(pixels / 255, cv2.COLOR_BGR2YCrCb) * 255
+                pixels[..., :1] += v["bias"] * 255 + dither
+                flat = pixels.reshape(-1, 1, 3)
+                # Brightness counts double: tone carries the picture, hue the mood.
+                distance = (np.abs(flat - target[None]) * np.array([2, 1, 1], np.float32)).sum(2)
+            else:
+                pixels += v["bias"] * 255 + dither
+                flat = pixels.reshape(-1, 3)
+                distance = (flat * flat).sum(1)[:, None] - 2 * flat @ palette.T + (palette * palette).sum(1)
+            shape = pixels.shape
+            out[start:start + 32] = paint[distance.argmin(1)].reshape(shape).astype(np.uint8)
         if v["gap"] > 0 and scale >= 2:
             edge = ((np.arange(h) % scale == scale - 1)[:, None]
                     | (np.arange(w) % scale == scale - 1)[None, :])
             out[edge] = (out[edge] * (1 - v["gap"])).astype(np.uint8)
         return out
+
+    @staticmethod
+    def _grade(palette, grade, curve):
+        """Recolour matched palette entries, index for index, like a film stock would."""
+        if grade == 0 and curve <= 0:
+            return palette
+        c = palette / 255
+        if curve > 0:
+            c = c + curve * (c * c * (3 - 2 * c) - c)
+        gray = c.mean(1, keepdims=True)
+        if grade == 1:    # Instant: warm, lifted blacks, a little muted
+            c = gray + (c - gray) * .85
+            c = c * [.88, .98, 1.04] + [.05, .04, .03]
+        elif grade == 2:  # Slide: saturated and punchy, cool shadows
+            c = gray + (c - gray) * 1.3
+            c = (c - .5) * 1.12 + .5 + [.03, 0, 0] * (1 - gray)
+        elif grade == 3:  # Faded: soft contrast, raised blacks, washed colour
+            c = gray + (c - gray) * .75
+            c = c * .8 + .12
+        elif grade == 4:  # Night: cool blue cast, deeper shadows
+            c = c * [1.1, .95, .78] + [.04, .01, 0]
+            c = (c - .5) * 1.05 + .48
+        return np.clip(c, 0, 1) * 255
 
     def _shimmer(self, t, v, x, y, scale):
         """Per-cell brightness wave, each cell on its own phase and rate."""
