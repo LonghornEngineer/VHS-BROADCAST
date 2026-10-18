@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["palette"],
+  "parameters": {
+    "text.enabled": 0,
+    "palette.enabled": 1,
+    "palette.palette": 9,
+    "palette.colors": 32,
+    "palette.mode": 1,
+    "palette.amount": 0.65,
+    "palette.scale": 2,
+    "palette.space": 1,
+    "palette.blocks": 1,
+    "palette.grade": 1,
+    "palette.curve": 0.3
+  },
+  "timeline": {
+    "tracks": {
+      "palette.palette": {
+        "t": [0, 3.3, 6.6],
+        "v": [9, 10, 11],
+        "interpolation": "hold"
+      },
+      "palette.grade": {
+        "t": [0, 3.3, 6.6],
+        "v": [1, 3, 2],
+        "interpolation": "hold"
+      }
+    }
+  }
+}
