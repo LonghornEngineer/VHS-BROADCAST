@@ -1,4 +1,4 @@
-"""Raster sample-and-hold and time-based rolling shutter, rendered on CPU."""
+"""Raster sample-and-hold, rolling shutter and sync loss, rendered on CPU."""
 from __future__ import annotations
 
 import math
@@ -98,3 +98,94 @@ class RollingShutterEffect(TemporalEffect):
                 alpha = weight[None, rows, None]
                 out[:, rows] = np.clip(a[:, rows] * (1 - alpha) + b[:, rows] * alpha, 0, 255).astype(np.uint8)
         return cv2.addWeighted(frame, 1 - v["amount"], out, v["amount"], 0), {"history": history}
+
+
+class SyncLossEffect(TemporalEffect):
+    """Digital sync dropout: crushed low-bit colour, smeared lines, freezes and blackouts."""
+    id = "sync_loss"
+    label = "SYNC LOSS"
+    _BAYER = np.array([[0, 2], [3, 1]], np.float32) / 4 - .375
+
+    def build(self, params):
+        self.param("amount", "Mix", 1)
+        self.param("crush", "Black crush", .3, 0, .95)
+        self.param("bits", "Color bits", 2, 1, 8, step=1)
+        self.param("dither", "Dither", .7)
+        self.param("smear", "Line smear", .5)
+        self.param("split", "RGB split", .5)
+        self.param("burst", "Burst", .4)
+        self.param("freeze", "Freeze", .2)
+        self.param("dropout", "Dropout", .15)
+        self.param("rate", "Glitch Hz", 10, 0, 30)
+        self.param("seed", "Seed", 1, 0, 9999, step=1)
+
+    def process_history(self, frame, t, v, previous, dt):
+        if v["amount"] <= 0:
+            return frame, {}
+        # Integrated refresh keeps the random sequence stable while Hz is edited.
+        tick = math.floor(self.params.motion_phase("sync_loss.rate", t))
+        rng = np.random.default_rng((int(v["seed"]) * 7919 + tick * 104729) & 0xFFFFFFFF)
+        burst = rng.random() < v["burst"]
+        dropout = rng.random() < v["dropout"]
+        freeze = rng.random() < v["freeze"]
+        state = {}
+        source = frame
+        if freeze:
+            held = previous.get("frozen")
+            if held is not None and held.shape == frame.shape and previous.get("frozen_tick") == tick:
+                source = held
+            state = {"frozen": source, "frozen_tick": tick}
+        h, w = frame.shape[:2]
+        f = source.astype(np.float32) / 255
+        crush = min(v["crush"], .95)
+        f = np.clip((f - crush) / (1 - crush), 0, 1) ** 1.4
+        luma = f.mean(axis=2, keepdims=True)
+        f = np.clip(luma + (f - luma) * (1 + 1.5 * crush), 0, 1)
+        f = self._smear(f, rng, v, burst, dropout)
+        if dropout:
+            f *= .06
+            lit = rng.random(h) < .04
+            channel = rng.integers(1, 3, int(lit.sum()))
+            f[np.flatnonzero(lit), :, channel] = np.clip(f[np.flatnonzero(lit), :, channel] * 16, 0, 1)
+        levels = 2 ** int(v["bits"]) - 1
+        if levels < 255:
+            threshold = np.tile(self._BAYER, (h // 2 + 1, w // 2 + 1))[:h, :w, None] * v["dither"]
+            f = np.floor(np.clip(f * levels + .5 + threshold, 0, levels)) / levels
+        out = (f * 255).astype(np.uint8)
+        return cv2.addWeighted(frame, 1 - v["amount"], out, v["amount"], 0), state
+
+    @staticmethod
+    def _smear(f, rng, v, burst, dropout):
+        """Hold one sample per line run, per channel when RGB split is up."""
+        h, w = f.shape[:2]
+        chance = min(1, v["smear"] * (1.8 if burst else 1 if dropout else .2))
+        if chance <= 0:
+            return f
+        # Lines arrive in short bands, like a decoder losing several scanlines at once.
+        heights = rng.integers(1, 4, h)
+        band = np.repeat(np.arange(h), heights)[:h]
+        bands = band[-1] + 1
+        x = np.arange(w)[None, :]
+        out = f.copy()
+
+        def draw():
+            full = rng.random(bands) < (.6 if burst else .3)
+            return (rng.random(bands), full,
+                    np.where(full, 0, rng.integers(0, w, bands)),
+                    np.where(full, w, rng.integers(w // 8 + 1, w + 1, bands)),
+                    rng.integers(0, w, (bands, 6)))
+
+        shared = draw()
+        rows = np.arange(h)
+        for c in range(3):
+            own = draw()
+            split = rng.random(bands) < v["split"]
+            roll, full, start, length, picks = (
+                np.where(split[(...,) + (None,) * (a.ndim - 1)], b, a)[band]
+                for a, b in zip(shared, own))
+            inside = (roll < chance)[:, None] & (x >= start[:, None]) & (x < (start + length)[:, None])
+            # Full lines latch the brightest of a few samples, so lost lines glow.
+            brightest = f[rows[:, None], picks, c].max(axis=1)
+            held = np.where(full, brightest, f[rows, np.clip(start, 0, w - 1), c])
+            out[..., c] = np.where(inside, held[:, None], f[..., c])
+        return out

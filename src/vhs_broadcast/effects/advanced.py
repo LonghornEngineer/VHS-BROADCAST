@@ -203,7 +203,7 @@ class PaletteDitherEffect(Effect):
 
     def build(self, params):
         self.choice("palette", "Palette", ("Grayscale", "Green CRT", "Amber CRT", "CGA", "EGA",
-                                               "Handheld", "Sepia", "Ice"), 4)
+                                               "Handheld", "Sepia", "Ice", "Purple"), 4)
         self.param("colors", "Colors", 8, 2, 16, step=1)
         # Append modes: existing take/keyframe indices must keep their meanings.
         self.choice("mode", "Dither", ("None", "Bayer 4x4", "Noise", "Bayer 2x2",
@@ -215,6 +215,10 @@ class PaletteDitherEffect(Effect):
         self.param("bias", "Bias", 0, -.5, .5)
         self.param("animate", "Animate Noise", 1, 0, 1, step=1)
         self.param("seed", "Seed", 0, 0, 9999, step=1)
+        # Appended controls default off so earlier takes render unchanged.
+        self.param("shimmer", "Shimmer", 0)
+        self.param("shimmer_speed", "Shimmer Hz", 2, 0, 12)
+        self.param("gap", "LED Gap", 0)
 
     def colors(self, v):
         count = int(round(v["colors"]))
@@ -225,6 +229,11 @@ class PaletteDitherEffect(Effect):
         if mode == 5:
             rgb = np.array([[15, 56, 15], [48, 98, 48], [139, 172, 15], [155, 188, 15]])
             return rgb[np.linspace(0, 3, min(count, 4)).round().astype(int), ::-1]
+        if mode == 8:
+            # BGR stops: violet black, magenta, pale pink.
+            stops = np.array([[30, 4, 18], [220, 60, 200], [255, 235, 255]], np.float32)
+            at = np.linspace(0, 2, count)
+            return np.array([np.interp(at, [0, 1, 2], stops[:, c]) for c in range(3)]).T
         if mode >= 6:
             low, high = (([12, 20, 32], [180, 225, 255]) if mode == 6
                          else ([35, 12, 5], [255, 245, 210]))
@@ -262,6 +271,8 @@ class PaletteDitherEffect(Effect):
             noise = np.zeros((h, w), np.float32)
         palette = _u8(self.colors(v)).astype(np.float32)
         strength = v["amount"] * 255 / max(1, math.sqrt(len(palette)))
+        if v["shimmer"] > 0:
+            noise = noise + self._shimmer(t, v, x, y, scale) * v["shimmer"] / max(.05, v["amount"])
         out = np.empty_like(frame)
         for start in range(0, h, 32):
             pixels = frame[start:start + 32].astype(np.float32)
@@ -271,7 +282,21 @@ class PaletteDitherEffect(Effect):
             flat = pixels.reshape(-1, 3)
             distance = (flat * flat).sum(1)[:, None] - 2 * flat @ palette.T + (palette * palette).sum(1)
             out[start:start + 32] = palette[distance.argmin(1)].reshape(pixels.shape).astype(np.uint8)
+        if v["gap"] > 0 and scale >= 2:
+            edge = ((np.arange(h) % scale == scale - 1)[:, None]
+                    | (np.arange(w) % scale == scale - 1)[None, :])
+            out[edge] = (out[edge] * (1 - v["gap"])).astype(np.uint8)
         return out
+
+    def _shimmer(self, t, v, x, y, scale):
+        """Per-cell brightness wave, each cell on its own phase and rate."""
+        rng = np.random.default_rng(round(v["seed"]) * 7919 + 17)
+        rows, cols = y[-1] + 1, x[-1] + 1
+        phase = rng.random((rows, cols), dtype=np.float32)
+        rate = .5 + rng.random((rows, cols), dtype=np.float32)
+        clock = self.params.motion_phase("palette.shimmer_speed", t)
+        wave = np.sin(2 * math.pi * (clock * rate + phase)) * .5
+        return wave[y[:, None], x[None, :]]
 
 
 class TemporalDisplacementEffect(TemporalEffect):
