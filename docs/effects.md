@@ -7,6 +7,7 @@
 | Datamosh / Motion Smear | Choose the original optical flow or explicit block matching against the preceding frame; block size, search radius, motion strength, persistence, held vectors and corrupted vectors. This is a frame-processing simulation, not destructive codec editing. |
 | Composite Artifacts | Edge dot crawl, false color, horizontal chroma bandwidth, continuous phase drift. |
 | Palette / Dither | Grayscale, green/amber CRT, CGA, EGA, Handheld, Sepia and Ice palettes; 2–16 colors (CGA/Handheld cap at 4), Bayer 2x2/4x4/8x8, noise, clustered dots and horizontal/diagonal lines; amount, cell size, gamma, bias and noise seed/animation. |
+| Sync Loss | Digital signal dropout: black crush, low-bit colour with checker dither, lines smeared into solid bands (per channel with RGB Split), short frame freezes and near-black dropouts. Glitch Hz re-rolls the pattern; Burst, Freeze and Dropout set how often each tick goes heavy, holds or blacks out; Seed makes it repeatable. Try `examples/sync-loss.json`. |
 | Temporal Displacement | Horizontal, vertical or radial slices of earlier frames; history seconds, depth and map animation. |
 | Block Corruption | Freeze/repeat/shift rectangles; block size, density, hold time, displacement and chroma-only operation. |
 | Phosphor Persistence | Highlight trails with separate R/G/B half-life seconds, threshold and strength. |

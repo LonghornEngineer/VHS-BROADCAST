@@ -176,7 +176,7 @@ Use the search field or **Enabled only** to find controls. Drag effects in
 | Tape and analog | Tracking, wobble, chroma, head switching, motor wow/flutter, RF interference |
 | CRT and color | Scanlines, bloom, geometry/mask, phosphor persistence, hue shift, solarize |
 | Pixel and retro | Palette/dither, Game Boy video, Tile Scramble, pixel sorting, RGB channel controls |
-| Digital damage | Block Corruption, datamosh-style motion smear, raster hold, rolling shutter |
+| Digital damage | Block Corruption, Sync Loss, datamosh-style motion smear, raster hold, rolling shutter |
 | Composition | Frame Move / Wrap, video feedback, temporal displacement, luma key, OSD |
 
 See the [effect reference](docs/effects.md) for controls and suggested starting points.
