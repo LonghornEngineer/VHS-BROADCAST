@@ -6,7 +6,8 @@
 | Video Feedback | Previous output from this effect feeds the next frame; gain, decay, zoom, rotation, X/Y offset, mix/add/screen. |
 | Datamosh / Motion Smear | Choose the original optical flow or explicit block matching against the preceding frame; block size, search radius, motion strength, persistence, held vectors and corrupted vectors. This is a frame-processing simulation, not destructive codec editing. |
 | Composite Artifacts | Edge dot crawl, false color, horizontal chroma bandwidth, continuous phase drift. |
-| Palette / Dither | Grayscale, green/amber CRT, CGA, EGA, Handheld, Sepia and Ice palettes; 2–16 colors (CGA/Handheld cap at 4), Bayer 2x2/4x4/8x8, noise, clustered dots and horizontal/diagonal lines; amount, cell size, gamma, bias and noise seed/animation. |
+| Palette / Dither | Grayscale, green/amber CRT, CGA, EGA, Handheld, Sepia, Ice and Purple palettes; 2–16 colors (CGA/Handheld cap at 4), Bayer 2x2/4x4/8x8, noise, clustered dots and horizontal/diagonal lines; amount, cell size, gamma, bias and noise seed/animation. **Shimmer** makes each cell pulse on its own phase so the dither twinkles (Shimmer Hz sets the pace, Seed the pattern); **LED Gap** darkens the border of each cell for an LED-panel look when Cell px is 2 or more. Try `examples/purple-shimmer.json`. |
+| Sync Loss | Digital signal dropout: black crush, low-bit colour with checker dither, lines smeared into solid bands (per channel with RGB Split), short frame freezes and near-black dropouts. Glitch Hz re-rolls the pattern; Burst, Freeze and Dropout set how often each tick goes heavy, holds or blacks out; Seed makes it repeatable. Try `examples/sync-loss.json`. |
 | Temporal Displacement | Horizontal, vertical or radial slices of earlier frames; history seconds, depth and map animation. |
 | Block Corruption | Freeze/repeat/shift rectangles; block size, density, hold time, displacement and chroma-only operation. |
 | Phosphor Persistence | Highlight trails with separate R/G/B half-life seconds, threshold and strength. |
@@ -21,6 +22,12 @@ keyframes. Resetting or tweaking a control does not automatically create keys.
 
 ### Handheld and console glitches
 
+- **LED MATRIX**: redraws the picture as a dot-matrix LED sign. Each cell of
+  **LED px** becomes one round LED; **Threshold** decides which LEDs light (two
+  **Levels** is pure on/off, more levels give dimmable LEDs above the threshold).
+  **Dot size**, **Glow** and **Unlit LEDs** shape the panel, **Color** picks cool
+  white, amber, red, green or blue, and **Invert** lights the dark areas instead.
+  Try `examples/led-matrix.json`.
 - **GAME BOY / POCKET VIDEO**: reduces the picture to a logical pixel grid and
   four brightness-indexed colors, then enlarges it without smoothing. Classic
   Green, Pocket Gray, Cream / Plum and Blue / Mint palettes are included. Choose

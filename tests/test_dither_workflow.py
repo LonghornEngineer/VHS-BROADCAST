@@ -30,7 +30,7 @@ class DitherWorkflowTests(unittest.TestCase):
 
     def test_every_pattern_palette_scale_stays_in_palette_and_repeatable(self):
         saved = self.image.copy()
-        for palette in range(8):
+        for palette in range(9):
             colors = self.effect.colors({"palette": palette, "colors": 8}).clip(0, 255).astype(np.uint8)
             valid = {tuple(c) for c in colors}
             for mode in range(8):
@@ -70,6 +70,21 @@ class DitherWorkflowTests(unittest.TestCase):
         for mode in (1, 3, 4, 5, 6, 7):
             self.set(mode=mode)
             np.testing.assert_array_equal(self.effect.apply(self.image, 0), self.effect.apply(self.image, 10))
+
+    def test_purple_shimmer_animates_cells_and_gap_darkens_grid(self):
+        self.set(palette=8, colors=5, mode=3, scale=4)
+        still = self.effect.apply(self.image, 0)
+        np.testing.assert_array_equal(still, self.effect.apply(self.image, 3))
+        self.set(shimmer=.4, shimmer_speed=2)
+        first = self.effect.apply(self.image, 0)
+        np.testing.assert_array_equal(first, self.effect.apply(self.image, 0))
+        self.assertFalse(np.array_equal(first, self.effect.apply(self.image, .3)))
+        self.set(shimmer_speed=0)
+        np.testing.assert_array_equal(self.effect.apply(self.image, 0), self.effect.apply(self.image, 5))
+        self.set(shimmer=0, gap=1)
+        gapped = self.effect.apply(self.image, 0)
+        self.assertTrue((gapped[3::4] == 0).all() and (gapped[:, 3::4] == 0).all())
+        np.testing.assert_array_equal(gapped[:3, :3], still[:3, :3])
 
     def test_zero_dither_tones_and_tiny_frames(self):
         self.set(amount=0)

@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["palette"],
+  "parameters": {
+    "text.enabled": 0,
+    "palette.enabled": 1,
+    "palette.palette": 8,
+    "palette.colors": 5,
+    "palette.mode": 3,
+    "palette.amount": 0.5,
+    "palette.scale": 4,
+    "palette.shimmer": 0.25,
+    "palette.shimmer_speed": 2,
+    "palette.gap": 0.45
+  }
+}
