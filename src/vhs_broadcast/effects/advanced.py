@@ -179,16 +179,23 @@ class CompositeEffect(Effect):
         phase = self.params.motion_phase("composite.speed", t) * 2 * math.pi
         signal = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb).astype(np.float32)
         luma = signal[..., 0]
-        detail = luma - cv2.GaussianBlur(luma, (3, 3), 0)
+        # Measure detail over a few pixels: soft analog footage barely differs
+        # from a 3x3 blur, which left the artifacts invisible on real video.
+        detail = luma - cv2.GaussianBlur(luma, (0, 0), 1.5)
         x = np.arange(w, dtype=np.float32)[None, :]
         y = np.arange(h, dtype=np.float32)[:, None]
         carrier = np.cos(math.pi * (x + y) + phase)
-        signal[..., 0] += np.abs(detail) * carrier * v["dots"]
-        signal[..., 1] += detail * np.sin(math.pi * x / 2 + phase) * v["color"] * 1.5
-        signal[..., 2] += detail * np.cos(math.pi * x / 2 + phase) * v["color"] * 1.5
-        kernel = int((1 - v["bandwidth"]) * 20) | 1
+        signal[..., 0] += np.clip(np.abs(detail) * 4, 0, 64) * carrier * v["dots"]
+        signal[..., 1] += detail * np.sin(math.pi * x / 2 + phase) * v["color"] * 6
+        signal[..., 2] += detail * np.cos(math.pi * x / 2 + phase) * v["color"] * 6
+        smear = 1 - v["bandwidth"]
+        kernel = int(smear * 40) | 1
         if kernel > 1:
             signal[..., 1:] = cv2.GaussianBlur(signal[..., 1:], (kernel, 1), 0)
+        # Narrow chroma also arrives late, so colour slips right of its edges.
+        lag = int(round(smear * w / 160))
+        if lag:
+            signal[:, lag:, 1:] = signal[:, :-lag, 1:].copy()
         return cv2.cvtColor(_u8(signal), cv2.COLOR_YCrCb2BGR)
 
 
