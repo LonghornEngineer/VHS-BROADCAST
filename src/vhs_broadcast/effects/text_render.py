@@ -42,11 +42,28 @@ def default_font() -> str:
     return next(iter(fonts.values())) if fonts else ""
 
 
+def resolve_font(path: str) -> str:
+    """A usable font path for `path`, which may come from another computer's take.
+
+    Takes store absolute font paths, so a take moved between machines points at
+    a file that isn't there. Match the bundled font by file name, else use the
+    default bundled font, so the OSD keeps its face and size.
+    """
+    if path and Path(path).is_file():
+        return path
+    name = Path(path.replace("\\", "/")).name.lower() if path else ""
+    for candidate in _FONT_DIR.glob("*.ttf"):
+        if candidate.name.lower() == name:
+            return str(candidate)
+    return default_font()
+
+
 @lru_cache(maxsize=64)
 def _load_font(path: str, size: int) -> ImageFont.FreeTypeFont:
     try:
-        return ImageFont.truetype(path, size)
+        return ImageFont.truetype(resolve_font(path), size)
     except Exception:
+        # Last resort only: Pillow's bitmap font ignores the requested size.
         return ImageFont.load_default()
 
 

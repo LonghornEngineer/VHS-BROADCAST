@@ -135,6 +135,21 @@ class EffectTests(unittest.TestCase):
             self.assertEqual(other.get("solarize.amount").audio, p.get("solarize.amount").audio)
 
 
+class FontPortabilityTests(unittest.TestCase):
+    def test_take_font_from_another_computer_keeps_face_and_size(self):
+        from PIL import ImageFont
+        from vhs_broadcast.effects.text_render import _load_font, available_fonts, default_font, resolve_font
+        vt323 = available_fonts()["VT323"]
+        for foreign in ("C:\\Users\\someone\\VHS-BROADCAST\\src\\vhs_broadcast\\assets\\fonts\\VT323-Regular.ttf",
+                        "/home/other/VHS-BROADCAST/src/vhs_broadcast/assets/fonts/VT323-Regular.ttf"):
+            self.assertEqual(resolve_font(foreign), vt323)
+        self.assertEqual(resolve_font("/missing/NotBundled.ttf"), default_font())
+        self.assertEqual(resolve_font(vt323), vt323)
+        font = _load_font("/missing/NotBundled.ttf", 96)
+        self.assertIsInstance(font, ImageFont.FreeTypeFont)
+        self.assertEqual(font.size, 96)
+
+
 class UiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
