@@ -14,7 +14,7 @@ from vhs_broadcast.effects.advanced import (
     ADVANCED_EFFECTS, TemporalEffect, VideoFeedbackEffect, MotionSmearEffect,
     CompositeEffect, PaletteDitherEffect, TemporalDisplacementEffect,
     BlockCorruptionEffect, PhosphorPersistenceEffect, CRTGeometryEffect,
-    RFInterferenceEffect, LumaKeyEffect, LineDitherEffect,
+    RFInterferenceEffect, LumaKeyEffect, LineDitherEffect, FMVEffect,
 )
 
 
@@ -64,6 +64,31 @@ class AdvancedEffectsTests(unittest.TestCase):
         np.testing.assert_array_equal(trailing[0, 29:], trailing[19, 29:])  # both rows lit from x=29
         p.get("line_dither.follow").set_base(3)
         self.assertTrue((e.apply(frame, 0)[..., 0] > 128).any())
+
+    def test_fmv_blocks_frame_hold_and_skipped_blocks(self):
+        p, e = self.make(FMVEffect)
+        for name, value in dict(width=64, flatten=1, dither=0, skip=0, fps=0).items():
+            p.get("fmv." + name).set_base(value)
+        frame = np.random.default_rng(4).integers(0, 256, (48, 64, 3), dtype=np.uint8)
+        out = e.apply(frame, 0)
+        for y in range(0, 48, 4):
+            for x in range(0, 64, 4):
+                self.assertEqual(len(np.unique(out[y:y + 4, x:x + 4].reshape(-1, 3), axis=0)), 1)
+        grey = np.full_like(frame, 128)
+        self.assertTrue((np.ptp(e.apply(grey, .5).astype(int), axis=2) <= 2).all())
+        p.get("fmv.fps").set_base(10)
+        held = e.apply(frame, 1.0)
+        np.testing.assert_array_equal(e.apply(np.zeros_like(frame), 1.05), held)
+        self.assertFalse(np.array_equal(e.apply(np.zeros_like(frame), 1.1), held))
+        p.get("fmv.fps").set_base(0)
+        p.get("fmv.skip").set_base(1)
+        e.reset_state()
+        first = e.apply(frame, 2.0)
+        nudged = np.clip(frame.astype(int) + 3, 0, 255).astype(np.uint8)
+        np.testing.assert_array_equal(e.apply(nudged, 2.04), first)
+        self.assertFalse(np.array_equal(e.apply(255 - frame, 2.08), first))
+        p.get("fmv.amount").set_base(0)
+        np.testing.assert_array_equal(e.apply(frame, 2.12), frame)
 
     def test_every_effect_shape_type_no_input_mutation_and_pause(self):
         frames = [np.random.default_rng(i).integers(0, 256, (48, 64, 3), np.uint8) for i in range(3)]

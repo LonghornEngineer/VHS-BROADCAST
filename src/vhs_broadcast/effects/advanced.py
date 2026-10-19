@@ -705,8 +705,71 @@ class LineDitherEffect(Effect):
         return (x - last_off - 1).astype(np.float32)
 
 
+class FMVEffect(TemporalEffect):
+    """Early-90s CD-ROM video: low-res vector-quantised blocks, 8-bit colour and skipped blocks."""
+    id = "fmv"
+    label = "FMV / CD-ROM VIDEO"
+
+    def build(self, params):
+        self.param("amount", "Mix", 1)
+        self.param("width", "Width px", 240, 64, 640, step=4)
+        self.param("flatten", "Flat blocks", .4)
+        self.param("levels", "Luma levels", 24, 4, 64, step=1)
+        self.param("chroma", "Chroma levels", 8, 2, 32, step=1)
+        self.param("dither", "Dither", .6)
+        self.param("skip", "Skip blocks", .3)
+        self.param("fps", "Frame rate", 15, 0, 30, step=1)
+
+    def process_history(self, frame, t, v, previous, dt):
+        if v["amount"] <= 0:
+            return frame, {}
+        fps = int(v["fps"])
+        tick = math.floor(t * fps) if fps > 0 else None
+        held = previous.get("output")
+        if tick is not None and previous.get("tick") == tick and held is not None and held.shape == frame.shape:
+            return held, previous
+        h, w = frame.shape[:2]
+        sw = max(8, int(v["width"]) // 4 * 4)
+        sh = max(8, round(sw * h / w / 4) * 4)
+        small = cv2.resize(frame, (sw, sh), interpolation=cv2.INTER_AREA)
+        yuv = cv2.cvtColor(small, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+        bh, bw = sh // 4, sw // 4
+        blocks = yuv.reshape(bh, 4, bw, 4, 3)
+        mean4 = blocks.mean(axis=(1, 3))
+        # Detailed blocks keep four 2x2 patches; quiet ones collapse to one colour.
+        mean2 = yuv.reshape(bh, 2, 2, bw, 2, 2, 3).mean(axis=(2, 5))
+        detail = blocks[..., 0].std(axis=(1, 3))
+        # 0 never flattens, 1 flattens every block; the curve keeps mid values useful.
+        flat = detail < 24 * v["flatten"] / max(1e-4, 1.0001 - v["flatten"])
+        luma = np.where(flat[:, None, :, None], mean4[:, None, :, None, 0],
+                        mean2[..., 0].reshape(bh, 2, bw, 2))
+        luma = np.repeat(np.repeat(luma.reshape(sh // 2, sw // 2), 2, 0), 2, 1)
+        # Colour is coarser than brightness, one chroma pair per block.
+        chroma = np.repeat(np.repeat(mean4[..., 1:], 4, 0), 4, 1)
+        levels, chroma_levels = int(v["levels"]) - 1, int(v["chroma"]) - 1
+        # Codebook error looks like a fixed, irregular mottle per 2x2 patch, not a regular grid.
+        mottle = np.random.default_rng(7).random((sh // 2, sw // 2), dtype=np.float32) - .5
+        mottle = np.repeat(np.repeat(mottle, 2, 0), 2, 1) * v["dither"]
+        luma = np.round(np.clip(luma / 255 * levels + mottle, 0, levels)) / levels * 255
+        # Steps are counted from neutral so greys and black stay untinted.
+        step = 255 / chroma_levels
+        chroma = np.clip(128 + np.round((chroma - 128) / step + mottle[..., None] * .5) * step, 0, 255)
+        coded = cv2.cvtColor(_u8(np.dstack([luma, chroma])), cv2.COLOR_YCrCb2BGR)
+        # Conditional replenishment: blocks that barely changed keep last frame's pixels.
+        old_coded, old_means = previous.get("coded"), previous.get("means")
+        if v["skip"] > 0 and old_coded is not None and old_coded.shape == coded.shape:
+            still = np.abs(mean4[..., 0] - old_means) < v["skip"] * 14
+            keep = np.repeat(np.repeat(still, 4, 0), 4, 1)
+            coded = np.where(keep[..., None], old_coded, coded)
+            mean4 = mean4.copy()
+            mean4[still, 0] = old_means[still]
+        out = cv2.resize(coded, (w, h), interpolation=cv2.INTER_NEAREST)
+        out = cv2.addWeighted(frame, 1 - v["amount"], out, v["amount"], 0)
+        return out, {"output": out, "tick": tick, "coded": coded, "means": mean4[..., 0]}
+
+
 ADVANCED_EFFECTS = (VideoFeedbackEffect, MotionSmearEffect, CompositeEffect,
                     PaletteDitherEffect, TemporalDisplacementEffect,
                     BlockCorruptionEffect, PhosphorPersistenceEffect,
                     CRTGeometryEffect, RFInterferenceEffect, LumaKeyEffect,
-                    LineDitherEffect)
+                    LineDitherEffect, FMVEffect)

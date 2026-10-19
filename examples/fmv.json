@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["fmv"],
+  "parameters": {
+    "text.enabled": 0,
+    "fmv.enabled": 1,
+    "fmv.width": 240,
+    "fmv.fps": 15,
+    "fmv.skip": 0.3
+  },
+  "timeline": {
+    "tracks": {
+      "fmv.width": {
+        "t": [0, 5, 10],
+        "v": [320, 160, 320],
+        "interpolation": "linear"
+      }
+    }
+  }
+}
