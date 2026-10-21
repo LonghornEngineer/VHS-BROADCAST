@@ -331,11 +331,17 @@ class NoiseEffect(Effect):
         self.choice("shape", "Shape", ("Dots", "Tall", "Wide"))
         self.param("length", "Streak px", 12, 2, 128, step=1)
         self.param("columns", "Columns px", 0, 0, 64, step=1)
+        self.param("bands", "Bands", 0)
+        self.param("band_px", "Band px", 60, 4, 360, step=1)
+        self.param("band_rate", "Band Hz", 8, 0, 30)
+        self.param("band_glow", "Band glow", .6)
 
     def process(self, frame, t, v):
         h, w = frame.shape[:2]
         shape = int(v["shape"])
         out = frame
+        if v["bands"] > 1e-3:
+            out = self._fuzz_bands(out, t, v, shape)
         if v["grain"] > 1e-3:
             rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
             if shape == 0:
@@ -363,6 +369,39 @@ class NoiseEffect(Effect):
                         out[y:min(h, y + L), x] = 235
                     else:
                         out[y, x:min(w, x + L)] = 235
+        return out
+
+    def _fuzz_bands(self, frame, t, v, shape):
+        """Swallow whole horizontal bands of the picture in blown-out static."""
+        h, w = frame.shape[:2]
+        tick = math.floor(self.params.motion_phase("noise.band_rate", t))
+        rng = np.random.default_rng((tick * 2246822519 + 7) & 0xFFFFFFFF)
+        unit = h / 720                                   # Band px is measured at 720 tall
+        inside = np.zeros(h, bool)
+        target = min(1.0, v["bands"]) * h
+        for _ in range(1024):                            # drop bands until coverage is reached
+            if inside.sum() >= target:
+                break
+            height = max(2, int(v["band_px"] * unit * rng.uniform(.3, 1.6)))
+            top = int(rng.integers(-height // 2, h))
+            inside[max(0, top):min(h, top + height)] = True
+        rows = np.flatnonzero(inside)
+        if not len(rows):
+            return frame
+        # Fresh static every frame inside the bands, in the Fuzz shape.
+        snow = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
+        length = max(int(v["length"]) * 3, 24)
+        if shape == 0:
+            texture = snow.normal(0, 1, (len(rows), w, 1)).astype(np.float32)
+        else:
+            texture = self._streak_grain(snow, len(rows), w, length, shape == 1)
+        glow = v["band_glow"]
+        static = np.clip(110 + 70 * texture + glow * 120, 0, 255)
+        # Gaps in the streaks let a ghost of the picture through.
+        picture = frame[rows].astype(np.float32)
+        mix = np.clip(.65 + .3 * glow + .2 * texture, 0, 1)
+        out = frame.copy()
+        out[rows] = np.clip(picture * (1 - mix) + static * mix, 0, 255).astype(np.uint8)
         return out
 
     @staticmethod

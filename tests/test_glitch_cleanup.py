@@ -148,6 +148,23 @@ class AnalogShapeTests(unittest.TestCase):
         before = NoiseEffect(ParameterSet()); before.enabled_param().set_base(1)
         np.testing.assert_array_equal(dots.apply(flat, 3.0), before.apply(flat, 3.0))
 
+    def test_fuzz_bands_swallow_rows_by_coverage_and_hold_between_ticks(self):
+        from vhs_broadcast.effects.vhs import NoiseEffect
+        frame = np.full((180, 120, 3), 60, np.uint8)
+        p, fuzz = self.make(NoiseEffect, grain=0, dropout=0, bands=.4, band_px=40, band_rate=2, shape=2)
+        out = fuzz.apply(frame, 0.1)
+        hit = (out != frame).any(axis=(1, 2))
+        self.assertGreaterEqual(hit.mean(), .35)
+        self.assertLess(hit.mean(), .9)
+        self.assertGreater(out[hit].mean(), frame.mean() + 40)          # blown-out static
+        np.testing.assert_array_equal(out[~hit], frame[~hit])            # outside bands untouched
+        same_tick = (fuzz.apply(frame, 0.3) != frame).any(axis=(1, 2))
+        np.testing.assert_array_equal(same_tick, hit)                    # bands hold within a tick
+        p.get("noise.bands").set_base(1)
+        self.assertGreater((fuzz.apply(frame, 0.1) != frame).any(axis=(1, 2)).mean(), .95)
+        p.get("noise.bands").set_base(0)
+        np.testing.assert_array_equal(fuzz.apply(frame, 0.1), frame)
+
     def test_tearing_vertical_mirrors_horizontal_and_zigzag_bends_edges(self):
         from vhs_broadcast.effects.vhs import TearEffect
         frame = np.random.default_rng(1).integers(0, 256, (48, 64, 3), dtype=np.uint8)

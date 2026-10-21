@@ -29,7 +29,11 @@ original look, so older takes render unchanged.
 - **FUZZ** — **Shape** turns the grain into **Tall** vertical streaks or **Wide**
   horizontal ones, and runs the dropout dashes the same way. **Streak px** sets
   their length; with Tall, **Columns px** lines the dashes up in regular columns
-  (0 scatters them).
+  (0 scatters them). **Bands** swallows whole horizontal bands of the picture in
+  blown-out static, from a few strips up to nearly the full frame at 1; the
+  static follows Shape (Wide streaks, Tall barcode, Dots snow). **Band px** sets
+  their typical height, **Band Hz** how often they jump, and **Band glow** how
+  white they burn.
 - **TEARING** — **Direction: Vertical** shifts tall bands up and down instead of
   rows sideways. **Shape: Zigzag** steps rows sideways in a sawtooth so vertical
   edges turn into zigzags; **Zig px** sets the tooth height, **Amount** the
