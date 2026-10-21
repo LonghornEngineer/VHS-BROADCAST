@@ -327,25 +327,54 @@ class NoiseEffect(Effect):
     def build(self, params):
         self.param("grain", "Grain", 0.3, 0.0, 1.0)
         self.param("dropout", "Dropout", 0.1, 0.0, 1.0)
+        # Appended controls; Dots keeps the original round grain.
+        self.choice("shape", "Shape", ("Dots", "Tall", "Wide"))
+        self.param("length", "Streak px", 12, 2, 128, step=1)
+        self.param("columns", "Columns px", 0, 0, 64, step=1)
 
     def process(self, frame, t, v):
         h, w = frame.shape[:2]
+        shape = int(v["shape"])
         out = frame
         if v["grain"] > 1e-3:
             rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
-            noise = rng.normal(0, v["grain"] * 40, (h, w, 1)).astype(np.float32)
+            if shape == 0:
+                noise = rng.normal(0, v["grain"] * 40, (h, w, 1)).astype(np.float32)
+            else:
+                noise = self._streak_grain(rng, h, w, int(v["length"]), shape == 1) * v["grain"] * 40
             out = np.clip(out.astype(np.float32) + noise, 0, 255).astype(np.uint8)
         if v["dropout"] > 1e-3:
             rng = np.random.default_rng((int(t * 1000) ^ 0x5bd1e995) & 0xFFFFFFFF)
-            n = int(v["dropout"] * w * 0.5)
+            tall = shape == 1
+            n = int(v["dropout"] * (h if tall else w) * 0.5)
             if n > 0:
                 ys = rng.integers(0, h, n)
                 xs = rng.integers(0, w, n)
-                ln = rng.integers(2, max(3, w // 40), n)
+                if shape == 0:
+                    ln = rng.integers(2, max(3, w // 40), n)
+                else:
+                    ln = rng.integers(2, max(3, int(v["length"]) * (1 if tall else 4)), n)
+                spacing = int(v["columns"])
+                if tall and spacing > 0:
+                    xs = xs // spacing * spacing             # dashes line up in columns
                 out = out.copy()
                 for y, x, L in zip(ys, xs, ln):
-                    out[y, x:min(w, x + L)] = 235
+                    if tall:
+                        out[y:min(h, y + L), x] = 235
+                    else:
+                        out[y, x:min(w, x + L)] = 235
         return out
+
+    @staticmethod
+    def _streak_grain(rng, h, w, length, tall):
+        """Unit-variance grain stretched into streaks, each line on its own phase."""
+        length = max(2, length)
+        if not tall:
+            return NoiseEffect._streak_grain(rng, w, h, length, True).transpose(1, 0, 2)
+        cells = rng.normal(0, 1, (h // length + 2, w)).astype(np.float32)
+        offset = rng.integers(0, length, w)
+        rows = (np.arange(h)[:, None] + offset[None, :]) // length
+        return cells[rows, np.arange(w)[None, :]][..., None]
 
 
 # --------------------------------------------------------------------------- #
@@ -391,12 +420,31 @@ class TearEffect(Effect):
     def build(self, params):
         self.param("amount", "Amount", 0.2, 0.0, 1.0)
         self.param("count", "Slices", 0.3, 0.0, 1.0)
+        # Appended controls; defaults keep the original horizontal slices.
+        self.choice("direction", "Direction", ("Horizontal", "Vertical"))
+        self.choice("shape", "Shape", ("Slices", "Zigzag"))
+        self.param("step", "Zig px", 12, 2, 96, step=1)
 
     def process(self, frame, t, v):
+        if v["amount"] < 1e-3:
+            return frame
+        # Vertical tearing is horizontal tearing on the transposed picture.
+        vertical = int(v["direction"]) == 1
+        source = np.ascontiguousarray(frame.transpose(1, 0, 2)) if vertical else frame
+        if int(v["shape"]) == 1:
+            out = self._zigzag(source, t, v)
+        else:
+            out = self._slices(source, t, v)
+            if out is None:
+                return frame
+        return np.ascontiguousarray(out.transpose(1, 0, 2)) if vertical else out
+
+    @staticmethod
+    def _slices(frame, t, v):
         h, w = frame.shape[:2]
         n = int(v["count"] * 12)
-        if n == 0 or v["amount"] < 1e-3:
-            return frame
+        if n == 0:
+            return None
         rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
         out = frame.copy()
         for _ in range(n):
@@ -407,6 +455,21 @@ class TearEffect(Effect):
             if sh:
                 out[y0:y1] = np.roll(out[y0:y1], sh, axis=1)
         return out
+
+    @staticmethod
+    def _zigzag(frame, t, v):
+        """Rows step sideways in a sawtooth, so vertical edges turn into zigzags."""
+        h, w = frame.shape[:2]
+        step = max(2, int(v["step"]))
+        # Slices sets how far up the frame the zigzag reaches, from the bottom.
+        top = int(h * (1 - max(v["count"], .05)))
+        rows = np.arange(h)
+        phase = ((rows // 2 * 2) / step + t * 3) % 2           # rows move in pairs
+        tooth = np.abs(phase - 1) * 2 - 1                      # triangle wave in [-1, 1]
+        offset = np.round(tooth * v["amount"] * w * 0.06).astype(int)
+        offset[:top] = 0
+        cols = (np.arange(w)[None, :] - offset[:, None]) % w
+        return frame[rows[:, None], cols]
 
 
 # --------------------------------------------------------------------------- #
@@ -804,15 +867,47 @@ class BloomEffect(Effect):
         self.param("amount", "Amount", .35)
         self.param("threshold", "Cutoff", .65)
         self.param("radius", "Radius", .3)
+        # Appended controls, off by default: a filmed CRT that never sits still.
+        self.param("shake", "Shake px", 0, 0, 8)
+        self.param("line_jitter", "Line jitter px", 0, 0, 8)
+        self.param("jumps", "Jumps /s", 0, 0, 4)
 
     def process(self, frame, t, v):
-        if v["amount"] <= 0:
-            return frame
-        f = frame.astype(np.float32) / 255
-        highlights = np.maximum(f - v["threshold"], 0)
-        sigma = max(.3, frame.shape[1] / 720 * (1 + 18 * v["radius"]))
-        glow = cv2.GaussianBlur(highlights, (0, 0), sigma)
-        return np.clip((f + glow * v["amount"] * 3) * 255, 0, 255).astype(np.uint8)
+        out = frame
+        if v["amount"] > 0:
+            f = frame.astype(np.float32) / 255
+            highlights = np.maximum(f - v["threshold"], 0)
+            sigma = max(.3, frame.shape[1] / 720 * (1 + 18 * v["radius"]))
+            glow = cv2.GaussianBlur(highlights, (0, 0), sigma)
+            out = np.clip((f + glow * v["amount"] * 3) * 255, 0, 255).astype(np.uint8)
+        if v["shake"] > 0 or v["line_jitter"] > 0 or v["jumps"] > 0:
+            out = self._jitter(out, t, v)
+        return out
+
+    @staticmethod
+    def _jitter(frame, t, v):
+        """Whole-picture shake, per-scanline wobble and rare vertical-hold slips."""
+        h, w = frame.shape[:2]
+        unit = w / 720                                   # sizes are px at 720 wide
+        rng = np.random.default_rng(int(round(t * 30)) & 0xFFFFFFFF)
+        # Smooth drift plus a little per-frame noise, so it never sits still.
+        dx = v["shake"] * unit * (.6 * math.sin(t * 13.1) + .4 * rng.normal())
+        dy = v["shake"] * unit * .5 * (.6 * math.sin(t * 9.7 + 1.3) + .4 * rng.normal())
+        # Jumps land in short windows; each lasts about two frames.
+        window = int(t * 12.5)
+        slip = np.random.default_rng((window * 2654435761) & 0xFFFFFFFF)
+        if v["jumps"] > 0 and slip.random() < v["jumps"] / 12.5:
+            dx += slip.choice((-1, 1)) * .04 * w
+            dy += .05 * h
+        rows = np.zeros(h, np.float32)
+        if v["line_jitter"] > 0:
+            rows = rng.normal(0, v["line_jitter"] * unit, h).astype(np.float32)
+            rows = np.convolve(rows, np.ones(3, np.float32) / 3, mode="same")
+        x = np.arange(w)[None, :] - float(dx) - rows[:, None]
+        y = np.broadcast_to(np.arange(h)[:, None] - float(dy), (h, w))
+        # remap needs float32 maps; the jump offsets would otherwise promote to float64.
+        return cv2.remap(frame, x.astype(np.float32), np.ascontiguousarray(y, np.float32),
+                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
 
 
 class HueShiftEffect(Effect):

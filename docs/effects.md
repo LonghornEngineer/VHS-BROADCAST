@@ -21,6 +21,24 @@ All are reorderable and disabled initially. Numeric controls retain audio/LFO
 modulation and explicit keyframe buttons. Named modes use dropdowns and hold
 keyframes. Resetting or tweaking a control does not automatically create keys.
 
+### Streaks, tears and a shaking CRT
+
+These controls were added to existing filters; their defaults keep the
+original look, so older takes render unchanged.
+
+- **FUZZ** — **Shape** turns the grain into **Tall** vertical streaks or **Wide**
+  horizontal ones, and runs the dropout dashes the same way. **Streak px** sets
+  their length; with Tall, **Columns px** lines the dashes up in regular columns
+  (0 scatters them).
+- **TEARING** — **Direction: Vertical** shifts tall bands up and down instead of
+  rows sideways. **Shape: Zigzag** steps rows sideways in a sawtooth so vertical
+  edges turn into zigzags; **Zig px** sets the tooth height, **Amount** the
+  swing, and **Slices** how far up from the bottom it reaches.
+- **CRT BLOOM** — **Shake px** keeps the whole picture moving slightly,
+  **Line jitter px** shifts each scanline a little for ragged edges, and
+  **Jumps /s** adds brief vertical-hold slips. These work even with Amount at 0,
+  for shake without glow. Try `examples/analog-jitter.json`.
+
 ### Handheld and console glitches
 
 - **LED MATRIX**: redraws the picture as a dot-matrix LED sign. Each cell of

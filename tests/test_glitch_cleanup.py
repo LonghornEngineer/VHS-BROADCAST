@@ -115,6 +115,72 @@ class GlitchTests(unittest.TestCase):
         self.assertFalse(np.array_equal(effect.apply(second, 1.2), held))
 
 
+
+class AnalogShapeTests(unittest.TestCase):
+    def make(self, cls, **values):
+        params = ParameterSet()
+        effect = cls(params)
+        effect.enabled_param().set_base(1)
+        for key, value in values.items():
+            params.get(f"{effect.id}.{key}").set_base(value)
+        return params, effect
+
+    def test_fuzz_tall_and_wide_streaks_and_dash_columns(self):
+        from vhs_broadcast.effects.vhs import NoiseEffect
+        flat = np.full((60, 80, 3), 128, np.uint8)
+        def corr(img, axis):
+            g = img[..., 0].astype(float) - 128
+            a, b = (g[1:], g[:-1]) if axis == 0 else (g[:, 1:], g[:, :-1])
+            return np.corrcoef(a.ravel(), b.ravel())[0, 1]
+        _, tall = self.make(NoiseEffect, shape=1, grain=1, dropout=0, length=12)
+        out = tall.apply(flat, 1.0)
+        self.assertGreater(corr(out, 0), .7)
+        self.assertLess(abs(corr(out, 1)), .2)
+        np.testing.assert_array_equal(tall.apply(flat, 1.0), out)
+        _, wide = self.make(NoiseEffect, shape=2, grain=1, dropout=0, length=12)
+        out = wide.apply(flat, 1.0)
+        self.assertGreater(corr(out, 1), .7)
+        self.assertLess(abs(corr(out, 0)), .2)
+        _, dashes = self.make(NoiseEffect, shape=1, grain=0, dropout=1, length=10, columns=10)
+        hit = np.flatnonzero((dashes.apply(flat, 2.0) == 235).any(axis=(0, 2)))
+        self.assertTrue(len(hit) and (hit % 10 == 0).all())
+        _, dots = self.make(NoiseEffect)
+        before = NoiseEffect(ParameterSet()); before.enabled_param().set_base(1)
+        np.testing.assert_array_equal(dots.apply(flat, 3.0), before.apply(flat, 3.0))
+
+    def test_tearing_vertical_mirrors_horizontal_and_zigzag_bends_edges(self):
+        from vhs_broadcast.effects.vhs import TearEffect
+        frame = np.random.default_rng(1).integers(0, 256, (48, 64, 3), dtype=np.uint8)
+        _, horizontal = self.make(TearEffect, amount=1, count=1)
+        _, vertical = self.make(TearEffect, amount=1, count=1, direction=1)
+        flipped = horizontal.apply(np.ascontiguousarray(frame.transpose(1, 0, 2)), .5)
+        np.testing.assert_array_equal(vertical.apply(frame, .5), flipped.transpose(1, 0, 2))
+        edge = np.zeros((60, 100, 3), np.uint8)
+        edge[:, 50:] = 255
+        _, zig = self.make(TearEffect, amount=1, count=1, shape=1, step=10)
+        out = zig.apply(edge, 0)
+        # Shifted rows wrap around, so find the black-to-white step near the edge only.
+        first_white = 30 + (out[:, 30:80, 0] > 128).argmax(axis=1)
+        self.assertGreater(np.ptp(first_white), 4)
+        self.assertLessEqual(np.abs(first_white - 50).max(), round(100 * .06) + 1)
+        _, half = self.make(TearEffect, amount=1, count=.5, shape=1, step=10)
+        np.testing.assert_array_equal(half.apply(edge, 0)[:30], edge[:30])
+
+    def test_bloom_jitter_shakes_ragged_lines_and_jumps(self):
+        from vhs_broadcast.effects.vhs import BloomEffect
+        frame = np.random.default_rng(2).integers(0, 256, (72, 96, 3), dtype=np.uint8)
+        p, bloom = self.make(BloomEffect, amount=0)
+        np.testing.assert_array_equal(bloom.apply(frame, 1.0), frame)
+        p.get("bloom.shake").set_base(3)
+        first = bloom.apply(frame, 1.0)
+        np.testing.assert_array_equal(bloom.apply(frame, 1.0), first)
+        self.assertFalse(np.array_equal(bloom.apply(frame, 1.04), first))
+        p.get("bloom.shake").set_base(0)
+        p.get("bloom.jumps").set_base(4)
+        black = [bloom.apply(frame, i / 25)[:3].mean() for i in range(100)]
+        self.assertTrue(any(b < 5 for b in black))     # a slip uncovers the top edge
+
+
 class RenderSafetyTests(unittest.TestCase):
     @patch("vhs_broadcast.core.pipeline._AvFileSource._detect_hw", return_value=None)
     def test_cancel_preserves_destination_and_removes_partial_output(self, _probe):
