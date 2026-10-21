@@ -174,7 +174,7 @@ Use the search field or **Enabled only** to find controls. Drag effects in
 | Family | Examples |
 | --- | --- |
 | Tape and analog | Tracking, wobble, chroma, head switching, motor wow/flutter, RF interference |
-| CRT and color | Scanlines, bloom, geometry/mask, phosphor persistence, hue shift, solarize |
+| CRT and color | Scanlines, bloom with CRT shake/jitter, geometry/mask, phosphor persistence, hue shift, solarize |
 | Pixel and retro | Palette/dither, line dither, Game Boy video, LED matrix sign, Tile Scramble, pixel sorting, RGB channel controls |
 | Digital damage | Block Corruption, Sync Loss, FMV / CD-ROM video, datamosh-style motion smear, raster hold, rolling shutter |
 | Composition | Frame Move / Wrap, video feedback, temporal displacement, luma key, OSD |
