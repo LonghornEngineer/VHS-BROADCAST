@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 APP_NAME = "VHS BROADCAST DECK"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 # Preview is capped to this width for real-time performance. Final render can
 # use full resolution (see render CLI / File > Render).
