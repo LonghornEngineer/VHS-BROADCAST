@@ -211,12 +211,12 @@ class PaletteDitherEffect(Effect):
     def build(self, params):
         self.choice("palette", "Palette", ("Grayscale", "Green CRT", "Amber CRT", "CGA", "EGA",
                                                "Handheld", "Sepia", "Ice", "Purple",
-                                               "Riso Pop", "Field", "Dusk"), 4)
+                                               "Riso Pop", "Field", "Dusk", "Night City"), 4)
         self.param("colors", "Colors", 8, 2, 32, step=1)
         # Append modes: existing take/keyframe indices must keep their meanings.
         self.choice("mode", "Dither", ("None", "Bayer 4x4", "Noise", "Bayer 2x2",
                                           "Bayer 8x8", "Clustered Dots", "Horizontal Lines",
-                                          "Diagonal Lines"), 1)
+                                          "Diagonal Lines", "Blue Noise"), 1)
         self.param("amount", "Amount", .65)
         self.param("scale", "Cell px", 1, 1, 16, step=1)
         self.param("gamma", "Gamma", 1, .25, 3)
@@ -231,6 +231,8 @@ class PaletteDitherEffect(Effect):
         self.param("blocks", "Block average", 0, 0, 1, step=1)
         self.choice("grade", "Grade", ("None", "Instant", "Slide", "Faded", "Night"))
         self.param("curve", "S-curve", 0)
+        self.param("glow", "Glow", 0)
+        self.param("crush", "Crush", 0, 0, .8)
 
     # Multi-hue palettes (RGB), designed for photographic footage.
     MULTI_RGB = (
@@ -249,7 +251,26 @@ class PaletteDitherEffect(Effect):
          [240, 110, 100], [255, 170, 110], [255, 226, 160], [30, 40, 90], [40, 80, 140],
          [60, 140, 180], [120, 200, 210], [210, 240, 230], [90, 30, 60], [170, 100, 170],
          [250, 250, 240]],
+        # Night City: black, a warm olive-to-gold ramp, cool slate water, dusk violet, lamp cream.
+        [[0, 0, 0], [24, 22, 14], [52, 40, 16], [76, 62, 28], [100, 84, 44], [130, 112, 66],
+         [176, 156, 96], [232, 222, 160], [250, 246, 200], [30, 44, 44], [60, 78, 76],
+         [94, 104, 108], [92, 74, 104]],
     )
+
+    @staticmethod
+    def _blue_noise(size=64, seed=11):
+        """Tileable threshold map with even, irregular dot spacing (high-passed noise, ranked)."""
+        noise = np.random.default_rng(seed).random((size, size)).astype(np.float32)
+        for _ in range(3):
+            # Blur on a wrapped copy so the texture stays seamless when tiled.
+            pad = 8
+            wrapped = np.pad(noise, pad, mode="wrap")
+            blur = cv2.GaussianBlur(wrapped, (0, 0), 1.5)[pad:-pad, pad:-pad]
+            noise = noise - blur
+            ranks = np.empty(noise.size, np.float32)
+            ranks[np.argsort(noise, axis=None)] = np.arange(noise.size, dtype=np.float32)
+            noise = ranks.reshape(size, size) / noise.size
+        return noise - .5
 
     def colors(self, v):
         count = int(round(v["colors"]))
@@ -302,6 +323,11 @@ class PaletteDitherEffect(Effect):
                                    [11, 3, 2, 8], [15, 10, 9, 14]], np.float32) / 16 - .46875
             size = matrix.shape[0]
             noise = matrix[y[:, None] % size, x[None, :] % size]
+        elif mode == 8:
+            if not hasattr(PaletteDitherEffect, "_BLUE"):
+                PaletteDitherEffect._BLUE = PaletteDitherEffect._blue_noise()
+            size = self._BLUE.shape[0]
+            noise = self._BLUE[y[:, None] % size, x[None, :] % size]
         elif mode in (6, 7):
             noise = ((y[:, None] + (x[None, :] if mode == 7 else np.zeros((1, w), np.int32))) % 8) / 8 - .4375
         else:
@@ -313,6 +339,8 @@ class PaletteDitherEffect(Effect):
         strength = v["amount"] * (96 if luma else 255 / max(1, math.sqrt(len(palette))))
         if v["shimmer"] > 0:
             noise = noise + self._shimmer(t, v, x, y, scale) * v["shimmer"] / max(.05, v["amount"])
+        if v["crush"] > 0 or v["glow"] > 0:
+            frame = self._light(frame, v, scale)
         if v["blocks"] >= .5 and scale > 1:
             small = cv2.resize(frame, (-(-w // scale), -(-h // scale)), interpolation=cv2.INTER_AREA)
             frame = np.repeat(np.repeat(small, scale, 0), scale, 1)[:h, :w]
@@ -341,6 +369,21 @@ class PaletteDitherEffect(Effect):
                     | (np.arange(w) % scale == scale - 1)[None, :])
             out[edge] = (out[edge] * (1 - v["gap"])).astype(np.uint8)
         return out
+
+    @staticmethod
+    def _light(frame, v, scale):
+        """Before dithering: crush shadows to black and bloom highlights into halos."""
+        f = frame.astype(np.float32)
+        if v["crush"] > 0:
+            f = np.clip((f - v["crush"] * 255) / (1 - v["crush"]), 0, 255)
+        if v["glow"] > 0:
+            # Only the brightest lights bloom, into wide halos the dither turns to stipple.
+            highlights = np.maximum(f - 170, 0)
+            unit = frame.shape[1] / 720
+            near = cv2.GaussianBlur(highlights, (0, 0), max(1.0, 6 * unit))
+            far = cv2.GaussianBlur(highlights, (0, 0), max(2.0, 20 * unit))
+            f = f + (near * 2 + far * 4) * v["glow"]
+        return _u8(f)
 
     @staticmethod
     def _grade(palette, grade, curve):
