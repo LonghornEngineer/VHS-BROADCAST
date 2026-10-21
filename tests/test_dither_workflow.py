@@ -30,10 +30,10 @@ class DitherWorkflowTests(unittest.TestCase):
 
     def test_every_pattern_palette_scale_stays_in_palette_and_repeatable(self):
         saved = self.image.copy()
-        for palette in range(12):
+        for palette in range(13):
             colors = self.effect.colors({"palette": palette, "colors": 8}).clip(0, 255).astype(np.uint8)
             valid = {tuple(c) for c in colors}
-            for mode in range(8):
+            for mode in range(9):
                 for scale in (1, 16):
                     with self.subTest(palette=palette, mode=mode, scale=scale):
                         self.set(palette=palette, mode=mode, scale=scale)
@@ -110,6 +110,29 @@ class DitherWorkflowTests(unittest.TestCase):
         _, before = np.unique(plain.reshape(-1, 3), axis=0, return_inverse=True)
         _, after = np.unique(graded.reshape(-1, 3), axis=0, return_inverse=True)
         self.assertEqual(len(set(zip(before.ravel(), after.ravel()))), len(set(before.ravel())))
+
+    def test_blue_noise_glow_and_crush(self):
+        from vhs_broadcast.effects.advanced import PaletteDitherEffect
+        noise = PaletteDitherEffect._blue_noise()
+        self.assertEqual(noise.shape, (64, 64))
+        self.assertAlmostEqual(float(noise.mean()), 0, delta=.01)
+        # Blue noise has little low-frequency energy: neighbours anti-correlate.
+        self.assertLess(np.corrcoef(noise[:, 1:].ravel(), noise[:, :-1].ravel())[0, 1], 0)
+        self.set(palette=12, colors=32, mode=8, space=1)
+        grey = np.full((32, 48, 3), 110, np.uint8)
+        out = self.effect.apply(grey, 0)
+        np.testing.assert_array_equal(out, self.effect.apply(grey, 5))
+        self.assertGreater(len(np.unique(out.reshape(-1, 3), axis=0)), 1)
+        dot = np.zeros((48, 64, 3), np.uint8)
+        dot[22:26, 30:34] = 255
+        self.set(mode=0)
+        plain = self.effect.apply(dot, 0)
+        self.set(glow=1)
+        glowing = self.effect.apply(dot, 0)
+        self.assertGreater((glowing.max(axis=2) > 20).sum(), (plain.max(axis=2) > 20).sum() + 20)
+        self.set(glow=0, crush=.5)
+        dim = np.full((16, 16, 3), 100, np.uint8)
+        self.assertEqual(int(self.effect.apply(dim, 0).max()), 0)
 
     def test_zero_dither_tones_and_tiny_frames(self):
         self.set(amount=0)

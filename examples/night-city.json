@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["palette"],
+  "parameters": {
+    "text.enabled": 0,
+    "palette.enabled": 1,
+    "palette.palette": 12,
+    "palette.colors": 32,
+    "palette.mode": 8,
+    "palette.amount": 0.65,
+    "palette.scale": 2,
+    "palette.space": 1,
+    "palette.blocks": 1,
+    "palette.glow": 0.7,
+    "palette.crush": 0.06
+  }
+}
