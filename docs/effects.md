@@ -39,21 +39,28 @@ keyframes. Resetting or tweaking a control does not automatically create keys.
 ### Streaks, tears and a shaking CRT
 
 These controls were added to existing filters; their defaults keep the
-original look, so older takes render unchanged.
+original look, so older takes render unchanged (except CRT Bloom's glow, reworked below).
 
-- **FUZZ** — **Shape** turns the grain into **Tall** vertical streaks or **Wide**
-  horizontal ones, and runs the dropout dashes the same way. **Streak px** sets
+- **FUZZ** — **Shape** turns the grain into **Tall** vertical streaks, **Wide**
+  horizontal ones or **Smear**, and runs the dropout dashes the same way. **Streak px** sets
   their length; with Tall, **Columns px** lines the dashes up in regular columns
   (0 scatters them). **Bands** swallows whole horizontal bands of the picture in
   blown-out static, from a few strips up to nearly the full frame at 1; the
   static follows Shape (Wide streaks, Tall barcode, Dots snow). **Band px** sets
   their typical height, **Band Hz** how often they jump, and **Band glow** how
   white they burn.
+  With **Shape: Smear**, bands become smeared light instead of grain: long ragged streaks,
+  rows of dashes, clusters of glowing dots and tapered comets, with the picture showing
+  through between them;
+  **Streak px** setting how long they run. Try `examples/smear-fuzz.json`.
+
 - **TEARING** — **Direction: Vertical** shifts tall bands up and down instead of
   rows sideways. **Shape: Zigzag** steps rows sideways in a sawtooth so vertical
   edges turn into zigzags; **Zig px** sets the tooth height, **Amount** the
   swing, and **Slices** how far up from the bottom it reaches.
-- **CRT BLOOM** — **Shake px** keeps the whole picture moving slightly,
+- **CRT BLOOM**: **Amount**, **Cutoff** and **Radius** now glow on any footage: Cutoff is relative
+  to each frame's own highlights with a soft knee, the glow combines a tight core with wide
+  halos, and it is screened on so bright scenes glow instead of clipping to white. **Shake px** keeps the whole picture moving slightly,
   **Line jitter px** shifts each scanline a little for ragged edges, and
   **Jumps /s** adds brief vertical-hold slips. These work even with Amount at 0,
   for shake without glow. Try `examples/analog-jitter.json`.

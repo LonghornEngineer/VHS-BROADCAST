@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["noise", "bloom"],
+  "parameters": {
+    "text.enabled": 0,
+    "noise.enabled": 1,
+    "noise.shape": 3,
+    "noise.grain": 0,
+    "noise.dropout": 0,
+    "noise.band_px": 120,
+    "noise.band_rate": 6,
+    "noise.band_glow": 0.7,
+    "bloom.enabled": 1,
+    "bloom.amount": 0.6,
+    "bloom.radius": 0.4,
+    "bloom.shake": 1,
+    "bloom.line_jitter": 1.5
+  },
+  "timeline": {
+    "tracks": {
+      "noise.bands": {"t": [0, 2, 5, 7, 10], "v": [0, 0.35, 1, 0.5, 0.1], "interpolation": "smooth"}
+    }
+  }
+}

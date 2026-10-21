@@ -220,6 +220,31 @@ class AnalogShapeTests(unittest.TestCase):
         p.get("noise.bands").set_base(0)
         np.testing.assert_array_equal(fuzz.apply(frame, 0.1), frame)
 
+    def test_fuzz_smear_paints_bright_elements_in_bands_only(self):
+        from vhs_broadcast.effects.vhs import NoiseEffect
+        frame = np.full((180, 240, 3), 60, np.uint8)
+        p, fuzz = self.make(NoiseEffect, grain=0, dropout=0, shape=3, bands=.5, band_px=60, band_rate=2)
+        out = fuzz.apply(frame, .1)
+        np.testing.assert_array_equal(fuzz.apply(frame, .1), out)
+        hit = (np.abs(out.astype(int) - frame).max(axis=2) > 3).any(axis=1)
+        self.assertGreater(hit.mean(), .3)
+        self.assertLess(hit.mean(), .95)
+        self.assertGreater(int(out.max()), 200)                          # bright smeared light
+        self.assertGreater(np.ptp(out[hit].mean(axis=(1, 2))), 10)       # uneven, not a flat wash
+        p.get("noise.bands").set_base(0)
+        np.testing.assert_array_equal(fuzz.apply(frame, .1), frame)
+
+    def test_bloom_glows_dim_scenes_without_washing_out(self):
+        from vhs_broadcast.effects.vhs import BloomEffect
+        dim = np.full((90, 160, 3), 40, np.uint8)
+        dim[40:50, 70:90] = 150                                          # a dim light in a dark scene
+        _, bloom = self.make(BloomEffect)
+        out = bloom.apply(dim, 0).astype(int)
+        self.assertGreater(out[45, 60:70].mean(), dim[45, 60:70].mean() + 8)   # light spreads
+        bright = np.full((90, 160, 3), 200, np.uint8)
+        _, strong = self.make(BloomEffect, amount=1, threshold=.4, radius=.8)
+        self.assertLess(int((strong.apply(bright, 0) >= 254).all(axis=2).mean() * 100), 100)
+
     def test_tearing_vertical_mirrors_horizontal_and_zigzag_bends_edges(self):
         from vhs_broadcast.effects.vhs import TearEffect
         frame = np.random.default_rng(1).integers(0, 256, (48, 64, 3), dtype=np.uint8)
