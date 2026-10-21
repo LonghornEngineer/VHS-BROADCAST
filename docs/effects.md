@@ -21,6 +21,21 @@ All are reorderable and disabled initially. Numeric controls retain audio/LFO
 modulation and explicit keyframe buttons. Named modes use dropdowns and hold
 keyframes. Resetting or tweaking a control does not automatically create keys.
 
+### CRT raster and sync
+
+- **CRT RASTER / SYNC**: simulates the beam drawing line by line while its
+  horizontal sync keeps slipping. **Sync noise px** is how far each line's start
+  wanders. It carries over from line to line, so edges form coherent jagged
+  staircases rather than random fuzz. **Lock** sets how hard the sync circuit
+  pulls back: low gives long swinging streaks, high fine choppy raggedness.
+  **Kicks** adds rare sync spikes that leave big steps, **Crawl** moves the
+  jagged pattern down (or up) the screen like a real beam, and **Churn** mixes in
+  fresh noise each frame. **H-hold** makes later lines start later, so the
+  picture slants and wraps into diagonal tear bars. **V-hold** rolls the picture
+  with a dark **Blank bar** between frames. **Beam fade** dims lines the beam
+  drew a while ago, the band you see when a CRT is filmed, with **Beam speed**
+  for how fast it sweeps. Try `examples/crt-raster.json`.
+
 ### Handheld and console glitches
 
 - **LED MATRIX**: redraws the picture as a dot-matrix LED sign. Each cell of

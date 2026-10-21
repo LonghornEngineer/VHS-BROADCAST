@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["crt_raster"],
+  "parameters": {
+    "text.enabled": 0,
+    "crt_raster.enabled": 1,
+    "crt_raster.noise": 8,
+    "crt_raster.crawl": 0.6,
+    "crt_raster.beam": 0.5
+  },
+  "timeline": {
+    "tracks": {
+      "crt_raster.lock": {"t": [0, 3, 5], "v": [0.7, 0.15, 0.7], "interpolation": "linear"},
+      "crt_raster.kicks": {"t": [0, 3, 5], "v": [0.1, 0.9, 0.1], "interpolation": "linear"},
+      "crt_raster.hhold": {"t": [0, 5, 6.5, 7.5], "v": [0, 0, 0.4, 0], "interpolation": "linear"},
+      "crt_raster.vhold": {"t": [0, 7.5, 10], "v": [0, 0.35, 0.35], "interpolation": "hold"}
+    }
+  }
+}

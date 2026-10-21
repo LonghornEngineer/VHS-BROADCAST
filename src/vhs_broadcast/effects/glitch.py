@@ -1,4 +1,4 @@
-"""Raster sample-and-hold, rolling shutter and sync loss, rendered on CPU."""
+"""Raster sample-and-hold, rolling shutter, sync loss and CRT raster sync, rendered on CPU."""
 from __future__ import annotations
 
 import math
@@ -189,3 +189,85 @@ class SyncLossEffect(TemporalEffect):
             held = np.where(full, brightest, f[rows, np.clip(start, 0, w - 1), c])
             out[..., c] = np.where(inside, held[:, None], f[..., c])
         return out
+
+
+class CRTRasterEffect(Effect):
+    """A CRT beam that keeps losing horizontal sync: jagged crawling edges, skew, roll."""
+    id = "crt_raster"
+    label = "CRT RASTER / SYNC"
+    TABLE = 1 << 16
+    WARMUP = 256                          # lines run before the top so the error has settled
+
+    def build(self, params):
+        self.param("noise", "Sync noise px", 6, 0, 48)
+        self.param("lock", "Lock", .6)
+        self.param("kicks", "Kicks", .2)
+        self.param("crawl", "Crawl", .5, -3, 3)
+        self.param("churn", "Churn", .35)
+        self.param("hhold", "H-hold", 0, -1, 1)
+        self.param("vhold", "V-hold", 0, -1, 1)
+        self.param("bar", "Blank bar", .06, 0, .3)
+        self.param("beam", "Beam fade", 0)
+        self.param("beam_speed", "Beam speed", .3, -2, 2)
+        self._table = np.random.default_rng(1983).normal(0, 1, self.TABLE).astype(np.float32)
+        self._kick_table = np.random.default_rng(1984).random(self.TABLE).astype(np.float32)
+
+    def process(self, frame, t, v):
+        h, w = frame.shape[:2]
+        unit = w / 720                    # pixel controls are measured at 720 wide
+        offset = self._line_error(h, t, v) * unit
+        # H-hold out of lock: every line starts a little later, so the picture slants.
+        offset = offset + v["hhold"] * w * .5 * np.arange(h, dtype=np.float32) / h
+        out = frame
+        if np.abs(offset).max() >= .25:
+            map_x = np.arange(w, dtype=np.float32)[None, :] - offset[:, None]
+            map_x = np.mod(map_x, w) if v["hhold"] else map_x     # out of hold the picture wraps
+            map_y = np.broadcast_to(np.arange(h, dtype=np.float32)[:, None], (h, w))
+            out = cv2.remap(frame, np.ascontiguousarray(map_x, np.float32), np.ascontiguousarray(map_y),
+                            cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        roll = self.params.motion_phase("crt_raster.vhold", t)
+        if roll or v["bar"] > 0 and v["vhold"]:
+            shift = int(round((roll % 1) * h))
+            out = np.roll(out, shift, axis=0)
+            bar = int(v["bar"] * h)
+            if bar and v["vhold"]:
+                # The vertical blanking interval rolls into view as a dark bar.
+                rows = (np.arange(bar) + shift - bar) % h
+                out = out.copy()
+                out[rows] = (out[rows] * .08).astype(np.uint8)
+        if v["beam"] > 0:
+            out = self._beam_fade(out, t, v)
+        return out
+
+    def _line_error(self, h, t, v):
+        """Horizontal start error per line: noise integrated through a leaky sync loop."""
+        if v["noise"] <= 0:
+            return np.zeros(h, np.float32)
+        # Positive crawl slides the jagged pattern down the screen, like the beam.
+        lead = self.params.motion_phase("crt_raster.crawl", t) * h
+        start = -int(np.floor(lead)) - self.WARMUP
+        index = (np.arange(start, start + h + self.WARMUP) % self.TABLE)
+        drive = self._table[index]
+        if v["churn"] > 0:
+            fresh = np.random.default_rng(int(round(t * 1000)) & 0xFFFFFFFF)
+            drive = drive * (1 - v["churn"]) + fresh.normal(0, 1, drive.size).astype(np.float32) * v["churn"]
+        if v["kicks"] > 0:
+            # Sync spikes: rare, large impulses that leave a stepped edge behind.
+            kick = self._kick_table[index] < v["kicks"] * .02
+            drive = np.where(kick, drive * 12, drive)
+        keep = .995 - .9 * v["lock"]                       # low lock lets errors run for many lines
+        drive = drive * v["noise"] * math.sqrt(1 - keep * keep)
+        error = np.empty_like(drive)
+        acc = 0.0
+        for i, d in enumerate(drive.tolist()):
+            acc = keep * acc + d
+            error[i] = acc
+        return error[self.WARMUP:]
+
+    def _beam_fade(self, frame, t, v):
+        """Where the beam just passed is brightest; older lines have dimmed, as when filmed."""
+        h = frame.shape[0]
+        head = self.params.motion_phase("crt_raster.beam_speed", t) % 1
+        since = (head - np.arange(h, dtype=np.float32) / h) % 1   # how long since each line was drawn
+        gain = 1 - v["beam"] * .55 * (1 - np.exp(-since * 6))
+        return np.clip(frame * gain[:, None, None], 0, 255).astype(np.uint8)
