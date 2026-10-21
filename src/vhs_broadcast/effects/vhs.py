@@ -1021,7 +1021,7 @@ class PixelSortEffect(Effect):
 
 
 def default_effects(params: ParameterSet) -> list[Effect]:
-    from .glitch import RasterHoldEffect, RollingShutterEffect, SyncLossEffect
+    from .glitch import CRTRasterEffect, RasterHoldEffect, RollingShutterEffect, SyncLossEffect
     from .retro import GameBoyEffect, LEDMatrixEffect, NESCorruptionEffect, RGBTortureEffect
     return [
         TextOverlayEffect(params),
@@ -1039,6 +1039,7 @@ def default_effects(params: ParameterSet) -> list[Effect]:
         RGBTortureEffect(params),
         RasterHoldEffect(params),
         RollingShutterEffect(params),
+        CRTRasterEffect(params),
         SyncLossEffect(params),
         SlewEffect(params),
         WobbleEffect(params),

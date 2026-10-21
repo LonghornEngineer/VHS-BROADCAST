@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from vhs_broadcast.core.automation import Session, Timeline
 from vhs_broadcast.core.parameters import ParameterSet
 from vhs_broadcast.core.pipeline import RenderCancelled, render_to_file
-from vhs_broadcast.effects.glitch import RasterHoldEffect, RollingShutterEffect, SyncLossEffect
+from vhs_broadcast.effects.glitch import CRTRasterEffect, RasterHoldEffect, RollingShutterEffect, SyncLossEffect
 
 
 class GlitchTests(unittest.TestCase):
@@ -115,6 +115,61 @@ class GlitchTests(unittest.TestCase):
         self.assertFalse(np.array_equal(effect.apply(second, 1.2), held))
 
 
+
+class CRTRasterTests(unittest.TestCase):
+    def make(self, **values):
+        params = ParameterSet()
+        effect = CRTRasterEffect(params)
+        effect.enabled_param().set_base(1)
+        for key, value in values.items():
+            params.get(f"crt_raster.{key}").set_base(value)
+        return params, effect
+
+    def values(self, params, effect):
+        return {p.id.split(".")[-1]: p.evaluate(0) for p in effect.own_params()}
+
+    def test_sync_error_scales_with_noise_crawls_down_and_lock_sets_texture(self):
+        p, e = self.make(churn=0, kicks=0, crawl=1, noise=6)
+        h = 360
+        a = e._line_error(h, 1.0, self.values(p, e))
+        b = e._line_error(h, 1.0 + 1 / 30, self.values(p, e))
+        np.testing.assert_allclose(a[:h - 12], b[12:], atol=1e-4)      # pattern slid 12 lines down
+        for lock in (0, .6, 1):
+            p.get("crt_raster.lock").set_base(lock)
+            errs = np.concatenate([e._line_error(h, t, self.values(p, e)) for t in np.arange(0, 20, .5)])
+            self.assertAlmostEqual(errs.std(), 6, delta=1.5)
+        p.get("crt_raster.lock").set_base(0)
+        smooth = e._line_error(h, 3.0, self.values(p, e))
+        p.get("crt_raster.lock").set_base(1)
+        rough = e._line_error(h, 3.0, self.values(p, e))
+        self.assertGreater(np.corrcoef(smooth[1:], smooth[:-1])[0, 1], np.corrcoef(rough[1:], rough[:-1])[0, 1] + .5)
+
+    def test_identity_jagged_edges_hold_roll_and_beam(self):
+        frame = np.zeros((120, 160, 3), np.uint8)
+        frame[:, 80:] = 200
+        p, e = self.make(noise=0, bar=0)
+        np.testing.assert_array_equal(e.apply(frame, 1.0), frame)
+        p.get("crt_raster.noise").set_base(10)
+        out = e.apply(frame, 1.0)
+        np.testing.assert_array_equal(e.apply(frame, 1.0), out)
+        edges = (out[:, 20:140, 0] > 100).argmax(axis=1) + 20
+        self.assertGreater(np.ptp(edges), 6)                            # jagged edge
+        p.get("crt_raster.noise").set_base(0)
+        p.get("crt_raster.hhold").set_base(.2)
+        # Lines past the right edge wrap to the left, so find the edge right of that strip.
+        slant = (e.apply(frame, 1.0)[:, 40:, 0] > 100).argmax(axis=1) + 40
+        self.assertEqual(slant[0], 80)
+        self.assertGreater(slant[-1], slant[0] + 10)                    # later lines start later
+        p.get("crt_raster.hhold").set_base(0)
+        p.get("crt_raster.vhold").set_base(.5)
+        p.get("crt_raster.bar").set_base(.1)
+        rolled = e.apply(np.full_like(frame, 200), .5)
+        dark = rolled[..., 0].mean(axis=1) < 40
+        self.assertEqual(int(dark.sum()), 12)                           # blanking bar rolls into view
+        p.get("crt_raster.vhold").set_base(0)
+        p.get("crt_raster.beam").set_base(1)
+        lit = e.apply(np.full_like(frame, 200), .25)[..., 0].mean(axis=1)
+        self.assertGreater(lit.max() - lit.min(), 60)
 
 class AnalogShapeTests(unittest.TestCase):
     def make(self, cls, **values):
