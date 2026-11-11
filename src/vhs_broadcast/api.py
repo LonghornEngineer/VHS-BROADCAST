@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 
-from .core.automation import Session, Timeline
+from .core.automation import Session, Timeline, held_key_warnings
 from .core.parameters import ParameterSet
 from .effects.stages import STAGES
 from .effects.vhs import default_effects
@@ -175,12 +175,13 @@ def create_take(spec: dict, output: str, *, overwrite: bool = False) -> dict:
     with tempfile.TemporaryDirectory() as directory:
         raw = Path(directory) / "spec.json"
         raw.write_text(json.dumps(data, allow_nan=False), encoding="utf-8")
-        _, _, _, session = _model()
+        params, effects, timeline, session = _model()
         session.load(str(raw))
         if session.source_path:
             session.source_path = str(Path(session.source_path).resolve())
         session.save(str(destination))
-    return {"path": str(destination), "session_version": Session.VERSION}
+    return {"path": str(destination), "session_version": Session.VERSION,
+            "warnings": held_key_warnings(params, timeline, effects)}
 
 
 def validate_take(path: str) -> dict:
@@ -191,6 +192,9 @@ def validate_take(path: str) -> dict:
     source = data.get("source")
     if not source or not Path(source).is_file():
         warnings.append("Source video is missing; provide a valid source or render --input.")
+    params, effects, timeline, session = _model()
+    session.load(path)
+    warnings += held_key_warnings(params, timeline, effects)
     return {"valid": True, "warnings": warnings,
             "tracks": len(data.get("timeline", {}).get("tracks", {}))}
 
