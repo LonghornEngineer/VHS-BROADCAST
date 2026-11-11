@@ -4,10 +4,11 @@ The picture is turned into the signal a VCR actually records, damaged where real
 gear damages it, and decoded back:
 
     RGB -> YIQ -> band-limit chroma -> modulate onto the colour subcarrier
-    -> composite noise, snow, head switching, tracking error (on the signal)
+    -> over-the-air RF noise through an envelope detector (snow), head switching
     -> separate luma/chroma again (notch or box decoder)
     -> chroma noise, phase error, chroma delay
-    -> tape: edge wave, luma/chroma bandwidth for SP/LP/EP, chroma lag, dropouts
+    -> tape: luma FM noise and clicks (tracking, head switch, worn tape), edge wave,
+       luma/chroma bandwidth for SP/LP/EP, chroma lag, dropouts
     -> RGB
 
 Because every artifact comes out of the same signal, they interact the way real
@@ -146,29 +147,6 @@ def smooth_noise(rng, rows, width, frequency, octaves=1):
     return total / norm
 
 
-def speckles(plane, rng, rate, scale):
-    """Snow: short ringing bursts scattered along the lines (rate = bursts per sample)."""
-    h, w = plane.shape
-    count = rng.poisson(rate * h * (w + 64))
-    if count == 0:
-        return plane
-    count = min(count, 20000)
-    out = plane.copy()
-    rows = rng.integers(0, h, count)
-    cols = rng.integers(-64, w, count)
-    for r, c in zip(rows, cols):
-        length = rng.uniform(8, 64) * scale
-        period = rng.uniform(length * 3, length * 5)
-        x = np.arange(int(math.ceil(length)), dtype=np.float32)
-        lo, hi = max(0, c), min(w, c + len(x))
-        if hi <= lo:
-            continue
-        seg = x[lo - c:hi - c]
-        out[r, lo:hi] += (np.cos(seg * math.pi / period) * (1 - seg / length) ** 2
-                          * rng.uniform(-1, 2, len(seg)).astype(np.float32))
-    return out
-
-
 # --------------------------------------------------------------------------- #
 #  The effect
 # --------------------------------------------------------------------------- #
@@ -207,10 +185,6 @@ class NTSCSignalEffect(Effect):
         self.param("seed", "Seed", 0, 0, 9999, step=1)
         # NTSC carries 480 picture lines; running the signal there is authentic and fast.
         self.choice("resolution", "Signal lines", ("480 (NTSC, fast)", "Full frame"))
-        # Physical: snow is RF noise through the TV's envelope detector, and tape noise,
-        # tracking and head switching come from the luma FM channel (see rf.py).
-        # Classic keeps the earlier drawn noise for comparison.
-        self.choice("static", "Static model", ("Physical (RF)", "Classic"))
 
     # ------------------------------------------------------------------ #
     def process(self, frame, t, v):
@@ -266,29 +240,21 @@ class NTSCSignalEffect(Effect):
         signal = y + i * _I_WAVE[phase] + q * _Q_WAVE[phase]
 
         # ---- damage on the composite signal
-        physical = int(v.get("static", 0)) == 0
         tape = int(v["tape"])
         unit = max(1.0, w / 640)
-        air = 0.0
-        if physical:
-            # Over the air: the composite rides a negative-AM carrier with tuner noise.
-            # Without a tape in the path, Signal noise is weak reception too.
-            air = min(1.0, v["snow"] + (0 if tape else v["noise"] * .5))
-            if air > 1e-3:
-                signal = envelope_detect(signal, air, self._rng(v, 2, field_no), unit)
-        else:
-            if v["noise"] > 0:
-                signal = signal + smooth_noise(self._rng(v, 1, field_no), h, w, .5 / scale) * v["noise"] * .25
-            if v["snow"] > 0:
-                signal = speckles(signal, self._rng(v, 2, field_no), v["snow"] * 1e-3, scale)
+        # Over the air: the composite rides a negative-AM carrier with tuner noise (rf.py).
+        # Without a tape in the path, Signal noise is weak reception too.
+        air = min(1.0, v["snow"] + (0 if tape else v["noise"] * .5))
+        if air > 1e-3:
+            signal = envelope_detect(signal, air, self._rng(v, 2, field_no), unit)
         if v["head_switch"] >= 1:
             signal = self._head_switch(signal, v, field_no, scale)
         if v["tracking"] >= 1:
-            signal = self._tracking(signal, v, field_no, scale, physical)
+            signal = self._tracking(signal, v, field_no, scale)
 
         # ---- receiver decoder: pull luma and chroma apart again
         y, i, q = self._decode(signal, int(v["decoder"]), phase, h, w)
-        if physical and air >= COLOUR_KILL:
+        if air >= COLOUR_KILL:
             i = np.zeros_like(i); q = np.zeros_like(q)          # colour killer: burst is lost
         if v["smear"] > 0:
             y = run_rows(y, _one_pole(2 ** (-4 * v["smear"]) * .25, scale), start="edge")
@@ -310,8 +276,8 @@ class NTSCSignalEffect(Effect):
             i, q = (self._lag(p, v["chroma_lag"] * scale, int(round(v["chroma_drop"] * scale))) for p in (i, q))
 
         # ---- the tape itself
-        if physical:
-            y, i, q = self._fm_playback(y, i, q, v, field_no, scale, unit, tape)
+        # Tape noise, mistracking and the head switch come from the luma FM channel.
+        y, i, q = self._fm_playback(y, i, q, v, field_no, scale, unit, tape)
         if tape:
             if v["edge_wave"] > 0:
                 wave = smooth_noise(self._rng(v, 7, 0), 1, h + 64, .05 / scale, 2)[0]
@@ -379,22 +345,15 @@ class NTSCSignalEffect(Effect):
         out[h - lines:] = band
         return out
 
-    def _tracking(self, signal, v, field_no, scale, physical=False):
+    def _tracking(self, signal, v, field_no, scale):
+        """Mistracking's sync wobble over the bottom lines; its noise comes from _fm_playback."""
         h, w = signal.shape
         lines = min(h, int(round(v["tracking"] * scale)))
         rng = self._rng(v, 10, field_no)
         ramp = np.arange(lines, dtype=np.float32) / max(1, lines)  # worse toward the bottom
         wobble = smooth_noise(rng, 1, lines, .5)[0]
-        band = shift_rows(signal[h - lines:], wobble * ramp * v["tracking_wave"] * .25 * scale)
-        if physical:
-            # The noise itself comes from the FM channel (_fm_playback); only the sync wobble is here.
-            out = signal.copy(); out[h - lines:] = band
-            return out
-        # Low-frequency streaks: noise near the subcarrier would decode as rainbow colour.
-        streaks = smooth_noise(rng, lines, w, .02 / scale, 2)
-        band += np.maximum(streaks, 0) * (ramp ** 2)[:, None] * v["tracking_snow"] * 1.6
-        band = speckles(band, rng, v["tracking_snow"] * 2e-3, scale) if v["tracking_snow"] > 0 else band
-        out = signal.copy(); out[h - lines:] = band
+        out = signal.copy()
+        out[h - lines:] = shift_rows(signal[h - lines:], wobble * ramp * v["tracking_wave"] * .25 * scale)
         return out
 
     def _fm_playback(self, y, i, q, v, field_no, scale, unit, tape):
