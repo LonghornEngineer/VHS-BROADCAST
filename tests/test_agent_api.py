@@ -125,3 +125,23 @@ class AgentApiTests(unittest.TestCase):
             self.assertEqual(len(frames), 4)
             for frame in frames[1:]:
                 np.testing.assert_allclose(frame.astype(float), frames[0].astype(float), atol=3)
+
+
+class ExampleTakeTests(unittest.TestCase):
+    def test_every_example_opens_as_a_take(self):
+        """The GUI's Open Take and the render CLI accept the spec shorthand the examples use."""
+        from vhs_broadcast.core.automation import Session, Timeline
+        from vhs_broadcast.core.parameters import ParameterSet
+        from vhs_broadcast.effects.vhs import default_effects
+        examples = sorted((Path(__file__).resolve().parents[1] / "examples").glob("*.json"))
+        self.assertTrue(examples)
+        for path in examples:
+            with self.subTest(example=path.name):
+                params = ParameterSet()
+                effects = default_effects(params)
+                session = Session(params, Timeline(), effects)
+                session.load(str(path))
+                spec = json.loads(path.read_text(encoding="utf-8"))
+                for pid, value in spec["parameters"].items():
+                    if isinstance(value, (int, float)):
+                        self.assertEqual(params.get(pid).value, params.get(pid).clamp(value))
