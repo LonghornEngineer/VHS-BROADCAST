@@ -11,12 +11,48 @@ order, and agents see each effect's `stage` in `vhs-agent catalog`.
 | Stage | Effects |
 | --- | --- |
 | Camera | OSD / Text, Frame Move / Wrap, Signal, Rolling Shutter |
-| Digital | Raster / Pixel Hold, Sync Loss, Downscale, Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
+| Digital | Raster / Pixel Hold, Sync Loss, Downscale, Digital Codec (real), Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
 | Tape / VCR | Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
 | Receiver / TV | Edge Ring, CRT Raster / Sync, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
 | CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask |
 | Stylize | Solarize, Signal Fold, Hue Shift, Pixel Sort, Game Boy, LED Matrix, Tile Scramble, RGB Channels / Bit Crush, Palette / Dither, Luma Key, Line Dither |
 | Composite | Video Feedback, Temporal Displacement |
+
+### Real codecs: Digital Codec
+
+**DIGITAL CODEC (REAL)** runs each frame through an actual period encoder and decoder, so
+blocking, mosquito noise, smeared motion and datamosh come from real compression. The
+encoder and decoder keep their state from frame to frame, the way a file or a stream would.
+
+| Format | Codec | Picture | Rate |
+| --- | --- | --- | --- |
+| Webcam 2006 | MPEG-4 Part 2 | 320 wide | 15 fps |
+| Video call | H.263 | 352x288 (CIF) | 12 fps |
+| MiniDV | DV, 4:1:1 colour | 720x480 | 29.97 fps |
+| Early web video | Sorenson Spark (FLV) | 320 wide | 15 fps |
+| VCD | MPEG-1 | 352 wide | 29.97 fps |
+| CD-ROM | Cinepak | 320 wide | 15 fps |
+| Windows Media | WMV 8 | 320 wide | 15 fps |
+| Videophone 1990 | H.261 | 176x144 (QCIF) | 10 fps |
+| QuickTime | Sorenson Video | 320 wide | 15 fps |
+
+- **Quality** sets the quantizer and bitrate: 0 is far worse than the period, 0.5 typical,
+  1 near-clean. DV and Cinepak have fixed quality.
+- **Size** scales the coded width (formats with a fixed picture size ignore it);
+  **Frame rate** overrides the format's rate (0 keeps it); **Keyframe every** sets the
+  keyframe interval in frames (0 keeps the format's).
+- **Datamosh** drops every keyframe after the first, so later frames paint their motion onto
+  an old picture: real datamosh, not a drawn smear. Encoders often code a cut as a P-frame
+  of fresh blocks, so while Datamosh is on the effect detects hard cuts and forces a keyframe
+  there to throw away; the new shot then leaks in block by block.
+- **Packet loss** drops whole frames' packets; **Bit errors** corrupts bytes inside packets,
+  giving true decoder error concealment. Both follow **Seed**, so renders repeat.
+- **Scaling** Smooth or Chunky when the small picture is enlarged back.
+- Encoding restarts after a backward seek or a jump, so render from the start of a section
+  to match playback. Costs 3-10 ms per frame, except Cinepak (about 55 ms; its encoder is slow).
+  MPEG-1 shows its picture one frame late, as its decoder needs the next frame to finish one.
+
+Try `examples/codec-mosh.json`.
 
 ### Merged effects
 
