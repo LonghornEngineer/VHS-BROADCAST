@@ -300,6 +300,17 @@ its spec before creation. Take files do not embed media.
 See [Agent API](docs/agent-api.md) for the JSON contract, Python functions, errors,
 stdin input, modulation settings and keyframe examples. No screen clicking is required.
 
+For MCP clients such as Claude Code or Claude Desktop, the optional **vhs-mcp**
+server exposes the same workflow as typed tools, plus frame previews returned as
+images so an agent can see its result before rendering:
+
+```sh
+uv sync --extra mcp
+claude mcp add vhs-broadcast -- uv run --directory /path/to/VHS-BROADCAST --extra mcp vhs-mcp
+```
+
+See [MCP server](docs/mcp.md) for the tool list and client setup.
+
 ## Troubleshooting
 
 - **Slow preview:** lower processing resolution/scale; disable expensive pixel-sort,

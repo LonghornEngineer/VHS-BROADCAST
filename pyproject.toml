@@ -16,10 +16,16 @@ dependencies = [
     "pyvirtualcam>=0.11",
 ]
 
+[project.optional-dependencies]
+# Agent-facing MCP server (vhs-mcp); the app and vhs-agent CLI do not need it.
+# mcp 2 renamed FastMCP to MCPServer; the server uses the v2 API.
+mcp = ["mcp>=2.3,<3"]
+
 [project.scripts]
 vhs-broadcast = "vhs_broadcast.app:main"
 vhs-render = "vhs_broadcast.render:main"
 vhs-agent = "vhs_broadcast.api:main"
+vhs-mcp = "vhs_broadcast.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -195,6 +195,39 @@ def validate_take(path: str) -> dict:
             "tracks": len(data.get("timeline", {}).get("tracks", {}))}
 
 
+def _load(path, source=None):
+    params, effects, timeline, session = _model()
+    session.load(path)
+    source = source or session.source_path
+    if not source or not Path(source).is_file():
+        raise ValueError("Source video is missing")
+    order = session.order or []
+    by_id = {e.id: e for e in effects}
+    effects = [by_id[i] for i in order] + [e for e in effects if e.id not in order]
+    return params, effects, timeline, source
+
+
+def load_take(path: str, source: str | None = None):
+    """Validate and load a take for rendering: (params, ordered effects, timeline, source)."""
+    validate_take(path)
+    return _load(path, source)
+
+
+def render_take(path: str, output: str, *, source: str | None = None, width: int = 720,
+                with_audio: bool = True, overwrite: bool = False, progress=None) -> dict:
+    """Render a native take to a video file; width 0 keeps full resolution."""
+    from .core.pipeline import render_to_file
+    validate_take(path)
+    if width != 0 and width < 16:
+        raise ValueError("width must be zero or at least 16 pixels")
+    if Path(output).exists() and not overwrite:
+        raise ValueError("Output exists; pass --overwrite to replace it")
+    params, effects, timeline, source = _load(path, source)
+    render_to_file(source, output, params, timeline, effects,
+                   max_width=width or None, with_audio=with_audio, progress=progress)
+    return {"path": str(Path(output).resolve())}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -223,23 +256,9 @@ def main(argv=None):
             elif args.command == "validate":
                 result = validate_take(args.session)
             else:
-                from .core.pipeline import render_to_file
-                validate_take(args.session)
-                if args.width != 0 and args.width < 16:
-                    raise ValueError("width must be zero or at least 16 pixels")
-                if Path(args.output).exists() and not args.overwrite:
-                    raise ValueError("Output exists; pass --overwrite to replace it")
-                params, effects, timeline, session = _model()
-                session.load(args.session)
-                source = args.input or session.source_path
-                if not source or not Path(source).is_file():
-                    raise ValueError("Source video is missing")
-                order = session.order or []
-                by_id = {e.id: e for e in effects}
-                effects = [by_id[i] for i in order] + [e for e in effects if e.id not in order]
-                render_to_file(source, args.output, params, timeline, effects,
-                               max_width=args.width or None, with_audio=not args.no_audio)
-                result = {"path": str(Path(args.output).resolve())}
+                result = render_take(args.session, args.output, source=args.input,
+                                     width=args.width, with_audio=not args.no_audio,
+                                     overwrite=args.overwrite)
         print(json.dumps({"ok": True, "api_version": API_VERSION, "result": result}, allow_nan=False))
         return 0
     except Exception as error:

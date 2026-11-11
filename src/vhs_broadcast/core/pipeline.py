@@ -337,6 +337,75 @@ class RenderCancelled(Exception):
     """The user stopped an export before its destination was replaced."""
 
 
+def source_position(params: ParameterSet, timeline: Timeline, fps: float, index: int) -> float:
+    """Source read-head position for output frame `index`, as render_frames reaches it
+    from frame 0. Motor speed is a pure function of time, so no decoding is needed."""
+    from .motor import motor_enabled, motor_speed
+    position = 0.0
+    for k in range(index):
+        t = k / fps
+        timeline.apply(t, params)
+        position += motor_speed(params, t) if motor_enabled(params) else 1.0
+    return position
+
+
+def render_frames(src: VideoSource, params: ParameterSet, timeline: Timeline,
+                  effects: list[Effect], *, max_width: Optional[int] = None,
+                  start: int = 0, start_pos: Optional[float] = None,
+                  progress=None, cancelled=None):
+    """Yield processed output frames from output index `start` (default 0).
+
+    Shared by the file render and agent previews so both select and process frames
+    identically. Starting mid-clip begins with empty effect history; pass
+    `start_pos` from source_position() to keep motor-warped frame selection exact.
+    """
+    from .motor import motor_enabled, motor_speed
+    pipeline = Pipeline(effects)
+    params.reset_motion(timeline)
+    fps = src.fps or 30.0
+    src_pos = float(start) if start_pos is None else start_pos
+    src.seek_frame(int(src_pos))
+    frame = src.read()
+    out_index = start
+    total = src.frame_count or 0
+    downsample = next((effect for effect in effects if effect.id == "downsample"), None)
+    held_frame = None
+    held_bucket = None
+    while frame is not None:
+        if cancelled and cancelled():
+            raise RenderCancelled()
+        t = out_index / fps
+        work = (scale_to_width(frame, max_width, cv2.INTER_AREA)
+                if max_width else frame)
+        timeline.apply(t, params)
+        processed = pipeline.process(work.copy(), t)
+        # Match the preview engine's FPS-hold stage after all effects.
+        fraction = params.get("downsample.fps").evaluate(t) / 100 if downsample else 1
+        if downsample and downsample.enabled_param().evaluate(t) >= .5 and fraction < .999:
+            bucket = int(t * max(1, fps * fraction))
+            if held_frame is None or held_bucket != bucket:
+                held_frame, held_bucket = processed.copy(), bucket
+            processed = held_frame
+        else:
+            held_frame, held_bucket = None, None
+        yield processed
+        out_index += 1
+
+        # advance the (warped) source read head
+        src_pos += motor_speed(params, t) if motor_enabled(params) else 1.0
+        target = int(src_pos)
+        nxt = frame
+        while src.index <= target:
+            f = src.read()
+            if f is None:
+                nxt = None
+                break
+            nxt = f
+        frame = nxt
+        if progress and total:
+            progress(min(1.0, src.index / total))
+
+
 def render_to_file(
     source_path: str,
     output_path: str,
@@ -416,12 +485,10 @@ def _render_to_file(
 
     from . import audio as audio_mod
     from . import audio_react
-    from .motor import motor_affects_audio, motor_enabled, motor_speed
+    from .motor import motor_affects_audio, motor_speed
 
     src = FileSource(source_path, read_ahead=False)
     resources.callback(src.release)
-    pipeline = Pipeline(effects)
-    params.reset_motion(timeline)
     fps = src.fps or 30.0
 
     # install audio-reactive analysis for this clip (restored afterwards) so the
@@ -459,48 +526,10 @@ def _render_to_file(
     if not writer.isOpened():
         raise IOError(f"cannot open writer: {video_target}")
 
-    src.seek_frame(0)
-    frame = src.read()
-    out_index = 0
-    src_pos = 0.0
-    total = src.frame_count or 0
-    downsample = next((effect for effect in effects if effect.id == "downsample"), None)
-    held_frame = None
-    held_bucket = None
     try:
-        while frame is not None:
-            if cancelled and cancelled():
-                raise RenderCancelled()
-            t = out_index / fps
-            work = (scale_to_width(frame, max_width, cv2.INTER_AREA)
-                    if max_width else frame)
-            timeline.apply(t, params)
-            processed = pipeline.process(work.copy(), t)
-            # Match the preview engine's FPS-hold stage after all effects.
-            fraction = params.get("downsample.fps").evaluate(t) / 100 if downsample else 1
-            if downsample and downsample.enabled_param().evaluate(t) >= .5 and fraction < .999:
-                bucket = int(t * max(1, fps * fraction))
-                if held_frame is None or held_bucket != bucket:
-                    held_frame, held_bucket = processed.copy(), bucket
-                processed = held_frame
-            else:
-                held_frame, held_bucket = None, None
+        for processed in render_frames(src, params, timeline, effects, max_width=max_width,
+                                       progress=progress, cancelled=cancelled):
             writer.write(processed)
-            out_index += 1
-
-            # advance the (warped) source read head
-            src_pos += motor_speed(params, t) if motor_enabled(params) else 1.0
-            target = int(src_pos)
-            nxt = frame
-            while src.index <= target:
-                f = src.read()
-                if f is None:
-                    nxt = None
-                    break
-                nxt = f
-            frame = nxt
-            if progress and total:
-                progress(min(1.0, src.index / total))
     finally:
         writer.release()
 
