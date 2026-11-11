@@ -57,6 +57,7 @@ class TemporalEffect(Effect):
 
 
 class VideoFeedbackEffect(TemporalEffect):
+    """A camera pointed at its own monitor: each frame sees a moved copy of the last output."""
     id = "feedback"
     label = "VIDEO FEEDBACK"
     stage = "composite"
@@ -69,24 +70,70 @@ class VideoFeedbackEffect(TemporalEffect):
         self.param("x", "Offset X", 0, -.25, .25)
         self.param("y", "Offset Y", 0, -.25, .25)
         self.choice("blend", "Blend", ("Mix", "Add", "Screen"), 2)
+        # Appended controls; the defaults keep the original fixed tunnel.
+        self.param("center_x", "Center X", 0, -.5, .5)
+        self.param("center_y", "Center Y", 0, -.5, .5)
+        self.param("drift", "Drift", 0, 0, .25)
+        self.param("spin", "Spin", 0, 0, 30)
+        self.param("shake", "Shake", 0)
+        self.param("keep", "Keep subject", 0)
+        self.choice("key", "Subject is", ("Bright", "Dark"))
+        self.param("loop", "Loop s", 0, 0, 60)
+
+    def _matrix(self, t, v, w, h):
+        loop = v["loop"]
+        # Every move goes out and back: with a loop length they all share its period.
+        periods = (loop, loop, loop) if loop > 0 else (7.3, 11.1, 9.0)
+        phase = [2 * math.pi * t / p for p in periods]
+        harmonic = 2 if loop > 0 else 1                      # y drifts at twice the rate, still periodic
+        cx = w * (.5 + v["center_x"] + v["drift"] * math.sin(phase[0]))
+        cy = h * (.5 + v["center_y"] + v["drift"] * math.sin(harmonic * phase[1]))
+        angle = v["angle"] + v["spin"] * math.sin(phase[2])
+        if v["shake"] > 0:
+            tick = int(round(t * 30))
+            if loop > 0:
+                tick %= max(1, int(round(loop * 30)))
+            rng = np.random.default_rng(tick)
+            cx += rng.normal() * v["shake"] * .01 * w
+            cy += rng.normal() * v["shake"] * .01 * h
+        matrix = cv2.getRotationMatrix2D((cx - .5, cy - .5), angle, v["zoom"])
+        matrix[:, 2] += (v["x"] * w, v["y"] * h)
+        return matrix
+
+    def _feed(self, frame, old, t, v, dt):
+        h, w = frame.shape[:2]
+        trail = cv2.warpAffine(old, self._matrix(t, v, w, h), (w, h), borderMode=cv2.BORDER_WRAP).astype(np.float32)
+        trail *= v["gain"] * v["decay"] ** (dt * 30)
+        f = frame.astype(np.float32)
+        mode = int(v["blend"])
+        if mode == 0:
+            out = _u8(f * (1 - min(1, v["gain"])) + trail)
+        elif mode == 1:
+            out = _u8(f + trail)
+        else:
+            out = _u8(255 - (255 - f) * (255 - np.minimum(trail, 255)) / 255)
+        if v["keep"] > 0:
+            # Luma key: the subject stays solid on top instead of smearing into the tunnel.
+            luma = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255
+            edge = 1 - v["keep"] if int(v["key"]) == 0 else v["keep"]
+            mask = (luma - edge) if int(v["key"]) == 0 else (edge - luma)
+            mask = np.clip(mask / .08 + .5, 0, 1)[..., None]
+            out = _u8(out * (1 - mask) + f * mask)
+        return out
 
     def process_history(self, frame, t, v, previous, dt):
         old = previous.get("output")
-        out = frame
-        if old is not None and v["gain"] > 0:
-            h, w = frame.shape[:2]
-            matrix = cv2.getRotationMatrix2D(((w - 1) / 2, (h - 1) / 2), v["angle"], v["zoom"])
-            matrix[:, 2] += (v["x"] * w, v["y"] * h)
-            trail = cv2.warpAffine(old, matrix, (w, h), borderMode=cv2.BORDER_WRAP).astype(np.float32)
-            trail *= v["gain"] * v["decay"] ** (dt * 30)
-            f = frame.astype(np.float32)
-            mode = int(v["blend"])
-            if mode == 0:
-                out = _u8(f * (1 - min(1, v["gain"])) + trail)
-            elif mode == 1:
-                out = _u8(f + trail)
-            else:
-                out = _u8(255 - (255 - f) * (255 - np.minimum(trail, 255)) / 255)
+        if v["gain"] <= 0:
+            return frame, {"output": frame.copy()}
+        if old is None:
+            if v["loop"] <= 0:
+                return frame, {"output": frame.copy()}
+            # Pre-build the trail so the loop's first frame already looks like its last.
+            old = frame
+            steps = int(min(90, v["loop"] * 30))
+            for k in range(steps, 0, -1):
+                old = self._feed(frame, old, t - k / 30, v, 1 / 30)
+        out = self._feed(frame, old, t, v, dt)
         return out, {"output": out.copy()}
 
 
