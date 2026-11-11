@@ -28,6 +28,8 @@ import cv2
 import numpy as np
 
 from .base import Effect
+from .rf import (COLOUR_KILL, dropout_compensate, envelope_detect, fm_demod, fm_rows, afc_drift,
+                 track_envelope)
 
 SUBCARRIER = 315e6 / 88               # NTSC colour subcarrier, Hz
 SAMPLE_RATE = SUBCARRIER * 4          # one pixel per sample at 480 lines
@@ -205,6 +207,10 @@ class NTSCSignalEffect(Effect):
         self.param("seed", "Seed", 0, 0, 9999, step=1)
         # NTSC carries 480 picture lines; running the signal there is authentic and fast.
         self.choice("resolution", "Signal lines", ("480 (NTSC, fast)", "Full frame"))
+        # Physical: snow is RF noise through the TV's envelope detector, and tape noise,
+        # tracking and head switching come from the luma FM channel (see rf.py).
+        # Classic keeps the earlier drawn noise for comparison.
+        self.choice("static", "Static model", ("Physical (RF)", "Classic"))
 
     # ------------------------------------------------------------------ #
     def process(self, frame, t, v):
@@ -260,17 +266,30 @@ class NTSCSignalEffect(Effect):
         signal = y + i * _I_WAVE[phase] + q * _Q_WAVE[phase]
 
         # ---- damage on the composite signal
-        if v["noise"] > 0:
-            signal = signal + smooth_noise(self._rng(v, 1, field_no), h, w, .5 / scale) * v["noise"] * .25
-        if v["snow"] > 0:
-            signal = speckles(signal, self._rng(v, 2, field_no), v["snow"] * 1e-3, scale)
+        physical = int(v.get("static", 0)) == 0
+        tape = int(v["tape"])
+        unit = max(1.0, w / 640)
+        air = 0.0
+        if physical:
+            # Over the air: the composite rides a negative-AM carrier with tuner noise.
+            # Without a tape in the path, Signal noise is weak reception too.
+            air = min(1.0, v["snow"] + (0 if tape else v["noise"] * .5))
+            if air > 1e-3:
+                signal = envelope_detect(signal, air, self._rng(v, 2, field_no), unit)
+        else:
+            if v["noise"] > 0:
+                signal = signal + smooth_noise(self._rng(v, 1, field_no), h, w, .5 / scale) * v["noise"] * .25
+            if v["snow"] > 0:
+                signal = speckles(signal, self._rng(v, 2, field_no), v["snow"] * 1e-3, scale)
         if v["head_switch"] >= 1:
             signal = self._head_switch(signal, v, field_no, scale)
         if v["tracking"] >= 1:
-            signal = self._tracking(signal, v, field_no, scale)
+            signal = self._tracking(signal, v, field_no, scale, physical)
 
         # ---- receiver decoder: pull luma and chroma apart again
         y, i, q = self._decode(signal, int(v["decoder"]), phase, h, w)
+        if physical and air >= COLOUR_KILL:
+            i = np.zeros_like(i); q = np.zeros_like(q)          # colour killer: burst is lost
         if v["smear"] > 0:
             y = run_rows(y, _one_pole(2 ** (-4 * v["smear"]) * .25, scale), start="edge")
         if v["ringing"] > 0:
@@ -291,7 +310,8 @@ class NTSCSignalEffect(Effect):
             i, q = (self._lag(p, v["chroma_lag"] * scale, int(round(v["chroma_drop"] * scale))) for p in (i, q))
 
         # ---- the tape itself
-        tape = int(v["tape"])
+        if physical:
+            y, i, q = self._fm_playback(y, i, q, v, field_no, scale, unit, tape)
         if tape:
             if v["edge_wave"] > 0:
                 wave = smooth_noise(self._rng(v, 7, 0), 1, h + 64, .05 / scale, 2)[0]
@@ -359,19 +379,71 @@ class NTSCSignalEffect(Effect):
         out[h - lines:] = band
         return out
 
-    def _tracking(self, signal, v, field_no, scale):
+    def _tracking(self, signal, v, field_no, scale, physical=False):
         h, w = signal.shape
         lines = min(h, int(round(v["tracking"] * scale)))
         rng = self._rng(v, 10, field_no)
         ramp = np.arange(lines, dtype=np.float32) / max(1, lines)  # worse toward the bottom
         wobble = smooth_noise(rng, 1, lines, .5)[0]
         band = shift_rows(signal[h - lines:], wobble * ramp * v["tracking_wave"] * .25 * scale)
+        if physical:
+            # The noise itself comes from the FM channel (_fm_playback); only the sync wobble is here.
+            out = signal.copy(); out[h - lines:] = band
+            return out
         # Low-frequency streaks: noise near the subcarrier would decode as rainbow colour.
         streaks = smooth_noise(rng, lines, w, .02 / scale, 2)
         band += np.maximum(streaks, 0) * (ramp ** 2)[:, None] * v["tracking_snow"] * 1.6
         band = speckles(band, rng, v["tracking_snow"] * 2e-3, scale) if v["tracking_snow"] > 0 else band
         out = signal.copy(); out[h - lines:] = band
         return out
+
+    def _fm_playback(self, y, i, q, v, field_no, scale, unit, tape):
+        """Luma FM playback with the RF level the head actually reads.
+
+        Mistracking runs the head toward the neighbouring track over the bottom Tracking
+        lines (Tracking snow sets how far), the head switch dips the RF where the heads
+        hand over, and Signal noise lowers the tape's carrier-to-noise ratio. Clicks and
+        grain are added before the tape's luma filters, so they take its bandwidth."""
+        h, w = y.shape
+        env = np.ones((h, 1), np.float32)
+        lines = min(h, int(round(v["tracking"] * scale)))
+        if lines >= 1:
+            rng = self._rng(v, 11, field_no)
+            ramp = np.arange(lines, dtype=np.float32) / max(1, lines)
+            wander = .06 * smooth_noise(rng, 1, lines, .5)[0]
+            reach = .3 + .75 * v["tracking_snow"]
+            env[h - lines:, 0] = track_envelope(.35 + reach * ramp ** 1.5 + wander)
+        switch = min(h, int(round(v["head_switch"] * scale)))
+        if switch >= 1:
+            at = h - switch
+            rows = np.arange(h, dtype=np.float32)
+            dip = np.exp(-np.square((rows - at) / max(1.0, 1.2 * scale)))
+            env[:, 0] *= 1 - .85 * dip
+            env[at:, 0] *= .8
+        if tape and v["noise"] > 0:
+            # The colour-under channel is noisy on worn tape too: slow, streaky colour noise.
+            n = v["noise"] * .12
+            i = i + smooth_noise(self._rng(v, 13, field_no), h, w, .03 / scale, 2) * n
+            q = q + smooth_noise(self._rng(v, 14, field_no), h, w, .03 / scale, 2) * n
+        if not tape and env.min() > .97:
+            return y, i, q
+        cnr = 26 - 22 * v["noise"] if tape else 40              # Signal noise: worn, cheap tape
+        rho, clicks, todo = fm_rows(env, cnr)
+        if not len(todo):
+            return y, i, q
+        rng = self._rng(v, 12, field_no)
+        y = y.copy(); i = i.copy(); q = q.copy()
+        # The colour-under carrier is low in frequency, so azimuth loss barely touches it and
+        # the colour holds on off-track until the RF is nearly gone.
+        luma, keep, chroma = fm_demod(y[todo] * 255, rho[todo], clicks[todo], rng, cnr, unit, kill=.04,
+                                      grain=1.35)          # EP/LP filtering softens it; worn tape is grainy
+        y[todo] = luma / 255
+        i[todo] *= chroma; q[todo] *= chroma
+        dropout_compensate([y, i, q], env, rng, todo, unit, max(1, round(4 * scale)))
+        dx = afc_drift(env, rng, 1.0, unit)
+        if dx is not None:
+            y, i, q = (shift_rows(p, dx, edge=True) for p in (y, i, q))
+        return y, i, q
 
     @staticmethod
     def _lag(plane, px, lines):
