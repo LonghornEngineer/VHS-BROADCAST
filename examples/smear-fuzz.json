@@ -1,7 +1,11 @@
 {
   "version": 2,
   "source": null,
-  "order": ["noise", "bloom"],
+  "order": [
+    "noise",
+    "bloom",
+    "crt_raster"
+  ],
   "parameters": {
     "text.enabled": 0,
     "noise.enabled": 1,
@@ -14,12 +18,30 @@
     "bloom.enabled": 1,
     "bloom.amount": 0.6,
     "bloom.radius": 0.4,
-    "bloom.shake": 1,
-    "bloom.line_jitter": 1.5
+    "crt_raster.enabled": 1,
+    "crt_raster.noise": 0,
+    "crt_raster.shake": 1,
+    "crt_raster.line_jitter": 1.5
   },
   "timeline": {
     "tracks": {
-      "noise.bands": {"t": [0, 2, 5, 7, 10], "v": [0, 0.35, 1, 0.5, 0.1], "interpolation": "smooth"}
+      "noise.bands": {
+        "t": [
+          0,
+          2,
+          5,
+          7,
+          10
+        ],
+        "v": [
+          0,
+          0.35,
+          1,
+          0.5,
+          0.1
+        ],
+        "interpolation": "smooth"
+      }
     }
   }
 }

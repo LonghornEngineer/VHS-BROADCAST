@@ -13,6 +13,7 @@ class RasterHoldEffect(Effect):
     """Latch a pixel's colour for a run along the raster scan direction."""
     id = "raster_hold"
     label = "RASTER / PIXEL HOLD"
+    stage = "digital"
 
     def build(self, params):
         self.param("amount", "Mix", .8)
@@ -54,6 +55,7 @@ class RollingShutterEffect(TemporalEffect):
     """Read scanlines from progressively older moments, with temporal interpolation."""
     id = "rolling_shutter"
     label = "ROLLING SHUTTER"
+    stage = "camera"
     MAX_HISTORY_BYTES = 96 * 1024 * 1024
     MAX_HISTORY_FRAMES = 120
 
@@ -104,6 +106,7 @@ class SyncLossEffect(TemporalEffect):
     """Digital sync dropout: crushed low-bit colour, smeared lines, freezes and blackouts."""
     id = "sync_loss"
     label = "SYNC LOSS"
+    stage = "digital"
     _BAYER = np.array([[0, 2], [3, 1]], np.float32) / 4 - .375
 
     def build(self, params):
@@ -195,6 +198,7 @@ class CRTRasterEffect(Effect):
     """A CRT beam that keeps losing horizontal sync: jagged crawling edges, skew, roll."""
     id = "crt_raster"
     label = "CRT RASTER / SYNC"
+    stage = "receiver"
     TABLE = 1 << 16
     WARMUP = 256                          # lines run before the top so the error has settled
 
@@ -209,6 +213,14 @@ class CRTRasterEffect(Effect):
         self.param("bar", "Blank bar", .06, 0, .3)
         self.param("beam", "Beam fade", 0)
         self.param("beam_speed", "Beam speed", .3, -2, 2)
+        # Formerly WOBBLE: a smooth sideways wave down the picture.
+        self.param("wave", "Wave", 0)
+        self.param("wave_freq", "Wave freq", 3.0, .5, 20.0, step=.1)
+        self.param("wave_speed", "Wave speed", 1.5, 0, 10, step=.1)
+        # Formerly CRT BLOOM's jitter: a filmed CRT that never sits still.
+        self.param("shake", "Shake px", 0, 0, 8)
+        self.param("line_jitter", "Line jitter px", 0, 0, 8)
+        self.param("jumps", "Jumps /s", 0, 0, 4)
         self._table = np.random.default_rng(1983).normal(0, 1, self.TABLE).astype(np.float32)
         self._kick_table = np.random.default_rng(1984).random(self.TABLE).astype(np.float32)
 
@@ -216,6 +228,11 @@ class CRTRasterEffect(Effect):
         h, w = frame.shape[:2]
         unit = w / 720                    # pixel controls are measured at 720 wide
         offset = self._line_error(h, t, v) * unit
+        amp = v["wave"] * w * 0.03
+        if amp >= .5:
+            phase = self.params.motion_phase("crt_raster.wave_speed", t)
+            rows = np.arange(h, dtype=np.float32)
+            offset = offset - amp * np.sin(rows / h * v["wave_freq"] * 2 * math.pi + phase)
         # H-hold out of lock: every line starts a little later, so the picture slants.
         offset = offset + v["hhold"] * w * .5 * np.arange(h, dtype=np.float32) / h
         out = frame
@@ -237,6 +254,9 @@ class CRTRasterEffect(Effect):
                 out[rows] = (out[rows] * .08).astype(np.uint8)
         if v["beam"] > 0:
             out = self._beam_fade(out, t, v)
+        if v["shake"] > 0 or v["line_jitter"] > 0 or v["jumps"] > 0:
+            from .vhs import BloomEffect
+            out = BloomEffect._jitter(out, t, v)
         return out
 
     def _line_error(self, h, t, v):

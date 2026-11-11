@@ -11,6 +11,7 @@ from .advanced import PaletteDitherEffect, TemporalEffect, _u8
 class GameBoyEffect(TemporalEffect):
     id = "gameboy"
     label = "GAME BOY / POCKET VIDEO"
+    stage = "stylize"
     # Dark-to-light RGB ramps. Inspired looks, not hardware emulation.
     PALETTES = np.array([
         [[15, 56, 15], [48, 98, 48], [139, 172, 15], [155, 188, 15]],
@@ -72,6 +73,7 @@ class LEDMatrixEffect(Effect):
     """A dot-matrix LED sign: thresholded cells drawn as round glowing LEDs."""
     id = "led_matrix"
     label = "LED MATRIX"
+    stage = "stylize"
     # BGR LED colours.
     COLORS = np.array([[255, 238, 222], [40, 170, 255], [40, 40, 255],
                        [90, 255, 90], [255, 140, 40]], np.float32) / 255
@@ -126,7 +128,8 @@ class LEDMatrixEffect(Effect):
 
 class RGBTortureEffect(Effect):
     id = "rgb_torture"
-    label = "RGB CHANNEL TORTURE"
+    label = "RGB CHANNELS / BIT CRUSH"
+    stage = "stylize"
 
     def build(self, params):
         self.param("amount", "Mix", 1)
@@ -137,6 +140,8 @@ class RGBTortureEffect(Effect):
             self.param(name + "gain", name.upper() + " Gain", 1, 0, 3)
             self.param(name + "bits", name.upper() + " Bits", 8, 1, 8, step=1)
             self.param(name + "invert", name.upper() + " Invert", 0, 0, 1, step=1)
+        # Formerly the separate BIT CRUSH effect: caps every channel's bit depth.
+        self.param("bits", "Bit depth", 8, 1, 8, step=1)
 
     def process(self, frame, t, v):
         if v["amount"] <= 0:
@@ -150,7 +155,7 @@ class RGBTortureEffect(Effect):
             channel = np.clip(channel * v[target + "gain"], 0, 255)
             if v[target + "invert"] >= .5:
                 channel = 255 - channel
-            levels = 2 ** round(v[target + "bits"]) - 1
+            levels = 2 ** min(round(v[target + "bits"]), round(v["bits"])) - 1
             out[..., "bgr".index(target)] = _u8(np.round(channel * levels / 255) * 255 / levels)
         return cv2.addWeighted(frame, 1 - v["amount"], out, v["amount"], 0)
 
@@ -159,6 +164,7 @@ class NESCorruptionEffect(Effect):
     """Stylized indexed-color tile scramble; legacy id preserves saved takes."""
     id = "nes_corrupt"
     label = "TILE SCRAMBLE"
+    stage = "stylize"
     COLORS = np.array([[15, 16, 28], [41, 44, 106], [80, 52, 160], [154, 43, 122],
                        [192, 52, 49], [156, 82, 28], [103, 120, 28], [41, 130, 66],
                        [25, 112, 136], [83, 157, 229], [149, 113, 233], [233, 119, 186],

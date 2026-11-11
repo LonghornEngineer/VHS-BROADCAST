@@ -171,13 +171,15 @@ Use the search field or **Enabled only** to find controls. Drag effects in
 
 ![Signal chain tab showing the processing order of enabled effects](docs/images/signal-chain.png)
 
-| Family | Examples |
+| Stage | Examples |
 | --- | --- |
-| Tape and analog | Tracking, wobble, chroma, head switching, motor wow/flutter, RF interference |
-| CRT and color | Scanlines, bloom with CRT shake/jitter, CRT raster/sync (jagged beam, H/V hold), geometry/mask, phosphor persistence, hue shift, solarize |
-| Pixel and retro | Palette/dither, line dither, Game Boy video, LED matrix sign, Tile Scramble, pixel sorting, RGB channel controls |
-| Digital damage | Block Corruption, Sync Loss, FMV / CD-ROM video, datamosh-style motion smear, raster hold, rolling shutter |
-| Composition | Frame Move / Wrap, video feedback, temporal displacement, luma key, OSD |
+| Camera | OSD, Frame Move / Wrap, Signal, rolling shutter |
+| Digital | Downscale, FMV / CD-ROM video, Block Corruption, datamosh-style motion smear, Sync Loss, raster hold |
+| Tape / VCR | Tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
+| Receiver / TV | CRT raster/sync (jagged beam, wave, shake, H/V hold), composite artifacts, RF interference, ghost |
+| CRT screen | Scanlines and interlace, bloom, geometry/mask, phosphor persistence |
+| Stylize | Palette/dither, line dither, Game Boy video, LED matrix sign, Tile Scramble, pixel sorting, RGB channels / bit crush, hue shift, solarize |
+| Composite | Video feedback, temporal displacement |
 
 See the [effect reference](docs/effects.md) for controls and suggested starting points.
 Tile Scramble retains the historical `nes_corrupt` ID for take compatibility.

@@ -1,5 +1,43 @@
 # Effect reference
 
+## Signal stages
+
+Effects are grouped in signal order, the way the picture travels through real gear. A new
+chain runs stage by stage, so a stacked look ("shot on a camcorder, compressed, dubbed to
+VHS, watched on a CRT") is one take. You can still drag effects within the chain;
+**RESET TO SIGNAL ORDER** in the Signal Chain tab puts them back. Takes save the chain
+order, and agents see each effect's `stage` in `vhs-agent catalog`.
+
+| Stage | Effects |
+| --- | --- |
+| Camera | OSD / Text, Frame Move / Wrap, Signal, Rolling Shutter |
+| Digital | Raster / Pixel Hold, Sync Loss, Downscale, Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
+| Tape / VCR | Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
+| Receiver / TV | Edge Ring, CRT Raster / Sync, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
+| CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask |
+| Stylize | Solarize, Signal Fold, Hue Shift, Pixel Sort, Game Boy, LED Matrix, Tile Scramble, RGB Channels / Bit Crush, Palette / Dither, Luma Key, Line Dither |
+| Composite | Video Feedback, Temporal Displacement |
+
+### Merged effects
+
+Four effects duplicated controls elsewhere and now live inside another effect. The new
+controls reproduce them (Bit Crush within one level of 255; Wobble except at the frame edge).
+Old takes that use the retired effects still load and render exactly as before: the
+effect's panel then appears, marked OLD, and is otherwise hidden.
+
+| Retired effect | Now |
+| --- | --- |
+| Wobble | CRT Raster / Sync: **Wave**, **Wave freq**, **Wave speed** |
+| TV Static | Fuzz: **Snow**, **Snow coarse**, **Snow colour** |
+| Interlace | Scanlines: **Interlace dim**, **Comb** |
+| Bit Crush | RGB Channels / Bit Crush: **Bit depth** (caps every channel) |
+| CRT Bloom's Shake px, Line jitter px, Jumps /s | CRT Raster / Sync: same names |
+
+**Downscale** (formerly Downsample) adds **Size** (By amount, 256 wide SNES, 320 wide VGA,
+or a custom **Width px**) and **Scaling** (Chunky or Smooth).
+
+## Effects
+
 
 | Effect | Controls and behavior |
 | --- | --- |
@@ -35,6 +73,9 @@ keyframes. Resetting or tweaking a control does not automatically create keys.
   with a dark **Blank bar** between frames. **Beam fade** dims lines the beam
   drew a while ago, the band you see when a CRT is filmed, with **Beam speed**
   for how fast it sweeps. Try `examples/crt-raster.json`.
+  **Wave** bends the picture in a smooth sideways wave (formerly Wobble), and **Shake px**,
+  **Line jitter px** and **Jumps /s** keep a filmed CRT moving: whole-picture shake, ragged
+  scanlines and brief vertical-hold slips.
 
 ### Streaks, tears and a shaking CRT
 
@@ -58,12 +99,11 @@ original look, so older takes render unchanged (except CRT Bloom's glow, reworke
   rows sideways. **Shape: Zigzag** steps rows sideways in a sawtooth so vertical
   edges turn into zigzags; **Zig px** sets the tooth height, **Amount** the
   swing, and **Slices** how far up from the bottom it reaches.
-- **CRT BLOOM**: **Amount**, **Cutoff** and **Radius** now glow on any footage: Cutoff is relative
+- **CRT BLOOM**: **Amount**, **Cutoff** and **Radius** glow on any footage: Cutoff is relative
   to each frame's own highlights with a soft knee, the glow combines a tight core with wide
-  halos, and it is screened on so bright scenes glow instead of clipping to white. **Shake px** keeps the whole picture moving slightly,
-  **Line jitter px** shifts each scanline a little for ragged edges, and
-  **Jumps /s** adds brief vertical-hold slips. These work even with Amount at 0,
-  for shake without glow. Try `examples/analog-jitter.json`.
+  halos, and it is screened on so bright scenes glow instead of clipping to white. The shake,
+  line jitter and jumps controls that used to be here are now in CRT Raster / Sync.
+  Try `examples/analog-jitter.json`.
 
 ### Handheld and console glitches
 

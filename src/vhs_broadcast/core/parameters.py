@@ -181,6 +181,8 @@ class Parameter:
     on_change: Optional[Callable[[str, float], None]] = None
     default: Optional[float] = None
     choices: tuple[str, ...] = ()
+    # Retired control kept only so older takes still render; hidden in the UI and catalog.
+    legacy: bool = False
 
     def __post_init__(self):
         if self.default is None:
