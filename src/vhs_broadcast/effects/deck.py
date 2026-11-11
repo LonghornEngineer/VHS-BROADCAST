@@ -16,6 +16,36 @@ import numpy as np
 from .advanced import TemporalEffect, _u8
 
 PLAY, PAUSE, FF, REW, STOP = range(5)
+
+
+def analog_snow(rng, h, w, colour=.25, streak=1.4, level=105, spread=62):
+    """TV snow as a receiver shows it, as float BGR around 0-255.
+
+    Random noise is band-limited along each line (the set's video bandwidth), so it
+    becomes short horizontal dashes rather than square pixels. Each line has its own
+    gain, peaks clip to white sparkles, and a faint low-resolution colour noise rides
+    on top, the way snow looks on a colour set with the colour killer off.
+    """
+    unit = max(1.0, w / 640)
+    noise = rng.normal(0, 1, (h, w)).astype(np.float32)
+    noise = cv2.GaussianBlur(noise, (0, 0), sigmaX=streak * unit, sigmaY=.01)
+    noise /= noise.std() + 1e-6
+    line_gain = 1 + .25 * rng.normal(0, 1, (h, 1)).astype(np.float32)
+    luma = level + spread * noise * line_gain
+    sparkle = np.maximum(noise - 2.2, 0) * 140                     # bright peaks clip toward white
+    luma = luma + sparkle
+    out = np.repeat(luma[..., None], 3, axis=2)
+    if colour > 0:
+        tint = rng.normal(0, 1, (max(2, h // 6), max(2, w // 24), 3)).astype(np.float32)
+        tint = cv2.resize(tint, (w, h), interpolation=cv2.INTER_LINEAR)
+        out += tint * 28 * colour
+    return out
+
+
+def _feather(rows, soft):
+    """Vertical weight for a band: 1 inside, easing to 0 over `soft` rows at each edge."""
+    edge = np.minimum(np.arange(rows) + 1, np.arange(rows)[::-1] + 1) / max(1.0, soft)
+    return np.clip(edge, 0, 1).astype(np.float32)[:, None, None]
 BLUE = (170, 0, 0)                     # BGR: the classic VCR blue screen
 
 
@@ -73,11 +103,19 @@ class VCRDeckEffect(TemporalEffect):
         return frame, state   # out of pause the tape simply resumes
 
     # ------------------------------------------------------------------ #
-    def _noise_band(self, rows, w, rng, strength):
-        snow = rng.integers(0, 256, (rows, w // 2 + 1), np.uint8).repeat(2, axis=1)[:, :w]
-        streaks = cv2.blur(snow, (25, 1))
-        band = np.maximum(snow * .5, streaks.astype(np.float32) * 1.2) * strength
-        return np.repeat(band[..., None], 3, axis=2)
+    @staticmethod
+    def _blend_band(region, rng, strength, soft):
+        """Snow over a strip of picture: denser in the middle, soft at the edges, with
+        the picture tearing through on some lines as the heads cross tracks."""
+        rows, w = region.shape[:2]
+        # Bar noise is mostly grey with white dashes: lighter, longer streaks than full snow.
+        snow = analog_snow(rng, rows, w, colour=.15, streak=3.0, level=135, spread=45)
+        weight = _feather(rows, soft) * strength
+        # Some lines still carry picture: the head is half on a track.
+        keep = (rng.random((rows, 1, 1)) < .35).astype(np.float32)
+        weight = weight * (1 - .6 * keep)
+        out = region.astype(np.float32) * (1 - weight) + snow * weight
+        return _u8(out)
 
     def _pause(self, held, t, v, rng):
         h, w = held.shape[:2]
@@ -89,11 +127,10 @@ class VCRDeckEffect(TemporalEffect):
             bounce = int(round(v["jitter"] * rng.integers(-1, 2)))
             out = np.roll(out, bounce, axis=0)
         if v["noise"] > 0:
-            rows = max(2, h // 18)
+            rows = max(4, h // 14)
             top = int(h * (.72 + .02 * math.sin(t * 3)))
-            band = self._noise_band(rows, w, rng, v["noise"])
-            region = out[top:top + rows].astype(np.float32)
-            out[top:top + rows] = _u8(region * .35 + band)
+            region = out[top:top + rows]
+            out[top:top + rows] = self._blend_band(region, rng, v["noise"], rows / 3)
         return out
 
     def _search(self, frame, t, v, rng, forward):
@@ -108,18 +145,16 @@ class VCRDeckEffect(TemporalEffect):
             lo, hi = max(0, top), min(h, top + rows)
             if hi <= lo:
                 continue
-            band = self._noise_band(hi - lo, w, rng, v["noise"])
             # The picture inside a bar slips sideways as the head crosses tracks.
-            slip = np.roll(frame[lo:hi], int(rng.integers(-w // 12, w // 12)), axis=1).astype(np.float32)
-            out[lo:hi] = _u8(slip * (1 - .7 * v["noise"]) + band)
+            slip = np.roll(frame[lo:hi], int(rng.integers(-w // 12, w // 12)), axis=1)
+            out[lo:hi] = self._blend_band(slip, rng, v["noise"], rows / 4)
         return out
 
     def _settle(self, frame, p, came_from, v, rng):
         """Tape loading: snow (from the blue screen), then the picture rolls into vertical hold."""
         h, w = frame.shape[:2]
         if p < .25:
-            snow = rng.integers(0, 256, (h, w // 2 + 1), np.uint8).repeat(2, axis=1)[:, :w]
-            snow = np.repeat(snow[..., None], 3, axis=2)
+            snow = _u8(analog_snow(rng, h, w))
             if came_from == STOP:
                 base = np.full_like(frame, BLUE)
                 return cv2.addWeighted(base, 1 - p * 4, snow, p * 4, 0)
@@ -131,8 +166,7 @@ class VCRDeckEffect(TemporalEffect):
             bar = max(2, h // 25)
             out[max(0, roll - bar):roll] = 10                         # the vertical blanking bar
         if v["noise"] > 0 and q < .8:
-            rows = max(3, int(h / 10 * (1 - q)))
+            rows = min(max(3, int(h / 10 * (1 - q))), h - int(h * .8))
             top = int(h * .8)
-            band = self._noise_band(min(rows, h - top), w, rng, v["noise"] * (1 - q))
-            out[top:top + band.shape[0]] = _u8(out[top:top + band.shape[0]] * .5 + band)
+            out[top:top + rows] = self._blend_band(out[top:top + rows], rng, v["noise"] * (1 - q), rows / 3)
         return out
