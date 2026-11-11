@@ -111,3 +111,38 @@ class OsdEdgeTests(unittest.TestCase):
         # The edge adds black around the letters; without it the darkest text pixels stay light.
         self.assertLess(int(edged.min()), 40)
         self.assertGreater((edged < 40).sum(), (off < 40).sum() + 50)
+
+
+class TrackingRollTests(unittest.TestCase):
+    def roll(self, t, **kw):
+        from vhs_broadcast.core.automation import Timeline
+        effect = make("tracking", **kw)
+        return effect, effect._roll_at(t)
+
+    def test_lost_sync_rolls_and_good_tracking_holds(self):
+        _, good = self.roll(5, error=0, speed=0)
+        self.assertEqual(good, 0)
+        _, lost = self.roll(5, error=1, speed=0)              # head fully on the wrong track
+        self.assertGreater(lost, .1)
+        _, off = self.roll(5, error=1, speed=0, vsync=0)       # V-sync loss switched off
+        self.assertEqual(off, 0)
+
+    def test_roll_is_the_same_played_or_jumped_to_and_pulls_back_in(self):
+        from vhs_broadcast.core.automation import Timeline
+        timeline = Timeline.from_dict({"tracks": {"tracking.error": {
+            "t": [0, 2, 3], "v": [1, 1, 0], "interpolation": "hold"}}})
+        played = make("tracking", speed=0)
+        played.params.reset_motion(timeline)
+        path = [played._roll_at(k / 30) for k in range(0, 150)]
+        jumped = make("tracking", speed=0)
+        jumped.params.reset_motion(timeline)
+        self.assertEqual(jumped._roll_at(149 / 30), path[-1])
+        self.assertGreater(path[60], 0)                        # rolling while tracking is lost
+        self.assertEqual(path[-1], 0)                          # locked again after recovering
+
+    def test_rolled_frame_shows_the_blanking_bar(self):
+        img = np.full((120, 160, 3), 150, np.uint8)
+        effect = make("tracking", error=1, speed=0)
+        effect._roll_at(2)
+        out = effect.apply(img, 2)
+        self.assertTrue((out.max(axis=(1, 2)) <= 10).any())

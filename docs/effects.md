@@ -215,7 +215,9 @@ Static on tape and TV effects is simulated from where it comes from rather than 
   tracks, so noise appears wherever it strays onto the neighbours: the VCR Deck's search and
   pause bars, and **TRACKING** (**Error** is a steady offset, **Skew** how far one field
   slants across the tracks, **Scroll** how fast the tracking phase slips, **Sync jitter** the
-  sideways wander of weak lines, **RF loss** the depth; the old Band Size control is gone).
+  sideways wander of weak lines, **RF loss** the depth; the old Band Size control is gone); **V-sync loss**: when the head reads too little RF where the field's vertical
+  sync is recorded, the TV's vertical hold free-runs and the picture rolls, with the black
+  blanking bar at the seam, then rolls home once tracking recovers. 0 turns the roll off).
 - **The FM demodulator.** While the RF is strong the picture is clean apart from fine
   grain. Near the FM threshold the demodulator throws clicks: white and black dashes with a
   fading tail. Below it, only noise is left. The dropout compensator patches weak spots with

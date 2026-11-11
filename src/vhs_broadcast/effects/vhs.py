@@ -109,7 +109,13 @@ class WobbleEffect(Effect):
 # --------------------------------------------------------------------------- #
 class TrackingEffect(Effect):
     """Mistracking modelled at the head: the band is where the head runs onto the
-    neighbouring track, which it can't read (azimuth loss). See ``rf.py``."""
+    neighbouring track, which it can't read (azimuth loss). See ``rf.py``.
+
+    Vertical sync is recorded where each field's track starts, at the top of the
+    picture. When the head reads too little RF there, the TV misses the sync pulses,
+    its vertical oscillator free-runs and the picture rolls; once tracking recovers it
+    pulls back in by finishing the roll.
+    """
     id = "tracking"
     label = "TRACKING"
     stage = "tape"
@@ -124,6 +130,55 @@ class TrackingEffect(Effect):
         # continuous roll rate: quadratic response so small values stay gentle
         self.param("rollspeed", "Roll Rate", 0.0, -1.0, 1.0, step=0.01)
         self.param("speed", "Scroll", 0.3, 0.0, 3.0, step=0.05)
+        self.param("vsync", "V-sync loss", 1.0)
+        self._roll = (None, [0.0])
+
+    # ---- vertical sync loss: a roll integrated over the take's history ----------
+    GRID = 1 / 30                   # integration step: the same frames for play, scrub and render
+    ROLL_RATE = 1.1                 # frames per second the free-running oscillator slips
+    PULL_IN = 2.5                   # how fast the picture rolls home once sync returns
+
+    def _value(self, name, tau):
+        p = self.params.get(f"tracking.{name}")
+        timeline = self.params._motion_timeline
+        track = timeline.tracks.get(p.id) if timeline is not None else None
+        return track.value_at(tau) if track is not None and track.times else p.value
+
+    def _roll_at(self, t):
+        """Fraction of a frame the picture has rolled at time t (0 = locked)."""
+        timeline = self.params._motion_timeline
+        names = ("enabled", "error", "speed", "noise", "vsync")
+        signature = tuple(
+            (self.params.get(f"tracking.{n}").value,
+             tuple(timeline.tracks[f"tracking.{n}"].times) + tuple(timeline.tracks[f"tracking.{n}"].values)
+             if timeline is not None and f"tracking.{n}" in timeline.tracks else ())
+            for n in names)
+        cached, history = self._roll
+        if cached != signature:
+            history = [0.0]
+            self._roll = (signature, history)
+        steps = int(max(0.0, t) / self.GRID)
+        if len(history) <= steps:
+            frac = history[-1]
+            slip = getattr(self, "_slip", (0, 0.0))[1] if len(history) > 1 else 0.0
+            for k in range(len(history), steps + 1):
+                tau = k * self.GRID
+                slip += self._value("speed", tau) * self.GRID
+                if self._value("enabled", tau) < .5:
+                    frac = 0.0
+                    history.append(frac)
+                    continue
+                top = self._value("error", tau) + 2 * slip
+                env = 1 - self._value("noise", tau) * (1 - float(track_envelope(top)))
+                lost = (1 - np.clip((env - .1) / .3, 0, 1)) * self._value("vsync", tau)
+                if lost > .02:
+                    frac = (frac + lost * self.ROLL_RATE * self.GRID) % 1
+                elif frac > 0:
+                    frac += self.PULL_IN * self.GRID
+                    frac = 0.0 if frac >= 1 else frac
+                history.append(frac)
+            self._slip = (steps, slip)
+        return history[steps]
 
     def process(self, frame, t, v):
         h, w = frame.shape[:2]
@@ -143,9 +198,18 @@ class TrackingEffect(Effect):
         rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
         env = track_envelope(place) * head_contact(rng, h)
         env = 1 - v["noise"] * (1 - env)
-        if env.min() > .97:
-            return out
-        return fm_playback(out, env, rng, sync=v["jitter"] * 2.5)
+        if env.min() <= .97:
+            out = fm_playback(out, env, rng, sync=v["jitter"] * 2.5)
+        frac = self._roll_at(t) if v["vsync"] > 1e-3 or self._roll[1][-1] else 0.0
+        if frac > 1e-3:
+            # The TV's raster slips: the picture rolls up, the blanking interval showing
+            # as a black bar at the seam.
+            shift = int(round(frac * h))
+            out = np.roll(out, -shift, axis=0)
+            bar = max(2, h // 14)
+            seam = (h - shift) % h
+            out[max(0, seam - bar // 2):min(h, seam + bar // 2)] = 8
+        return out
 
 
 # --------------------------------------------------------------------------- #
