@@ -1197,6 +1197,8 @@ def default_effects(params: ParameterSet) -> list[Effect]:
     from .stages import signal_order
     from .camera import CamcorderEffect
     from .deck import VCRDeckEffect
+    from .codec import CodecEffect
+    from .ntsc import NTSCSignalEffect
     return signal_order([
         TextOverlayEffect(params),
         CamcorderEffect(params),
@@ -1224,10 +1226,12 @@ def default_effects(params: ParameterSet) -> list[Effect]:
         GhostEffect(params),
         StaticEffect(params),
         LaserRotEffect(params),
+        NTSCSignalEffect(params),
         HeadSwitchEffect(params),
         NoiseEffect(params),
         ScanlinesEffect(params),
         DownsampleEffect(params),
+        CodecEffect(params),
         BitCrushEffect(params),
         InterlaceEffect(params),
         TearEffect(params),
