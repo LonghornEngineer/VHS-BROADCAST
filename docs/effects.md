@@ -88,11 +88,16 @@ informed by the stages of ntsc-rs (see THIRD_PARTY_NOTICES.md); the implementati
   slowly corrects toward neutral, so casts linger after cuts, plus a slow warm/cool drift),
   **Handheld** shake with **Handheld speed**, **Edge enhance** halos and **Black level**.
 - **VCR DECK** (Tape stage) works like pressing the machine's buttons: keyframe **Mode** to
-  Play, Pause (the held frame shudders with a noise bar; **Pause jitter**), Fast forward or
-  Rewind (noise bars run down or up; **Search bars**, **Bar speed**, **Bar noise**) and Stop
-  (the blue screen). Play after Stop runs the tape-loading settle: snow, then the picture
-  rolls into vertical hold over **Settle s**. After a search the bars fade out; out of Pause
-  the tape simply resumes. Transitions are timed from the mode's keyframes, so scrubbing,
+  Play, Pause (the held frame shudders and one noise bar sits low in the picture; **Pause
+  jitter**), Fast forward or Rewind (**Search speed x**, **Bar drift**) and Stop (the blue
+  screen). Play after Stop runs the tape-loading settle: blue while the tape threads, tape
+  noise as the drum spins up, bars sweeping through while the servo locks, and the picture
+  rolling into vertical hold, over **Settle s**. After a search the bars slide away; out of
+  Pause the tape simply resumes.
+  The bars are not drawn: they come from where the heads sit over the tracks (see *Analog
+  static* below), so a search at N× crosses N−1 tracks per field in FF and N+1 in REW, which
+  gives REW more bars. **RF loss** sets how far the signal drops off-track and **Tape CNR dB**
+  how clean the tape is, which sets how wide and ragged the bar edges are. Transitions are timed from the mode's keyframes, so scrubbing,
   preview and render agree. The footage itself plays at normal speed.
 
 Try `examples/camcorder-deck.json`.
@@ -156,6 +161,36 @@ keyframes. Resetting or tweaking a control does not automatically create keys.
   **Line jitter px** and **Jumps /s** keep a filmed CRT moving: whole-picture shake, ragged
   scanlines and brief vertical-hold slips.
 
+### Analog static
+
+Static on tape and TV effects is simulated from where it comes from rather than painted on
+(`effects/rf.py`):
+
+- **The heads over the tape.** VHS tracks alternate azimuth with no guard band, and a
+  head can't read the other head's tracks. The RF a head picks up is its overlap with its own
+  tracks, so noise appears wherever it strays onto the neighbours: the VCR Deck's search and
+  pause bars, and **TRACKING** (**Error** is a steady offset, **Skew** how far one field
+  slants across the tracks, **Scroll** how fast the tracking phase slips, **Sync jitter** the
+  sideways wander of weak lines, **RF loss** the depth; the old Band Size control is gone).
+- **The FM demodulator.** While the RF is strong the picture is clean apart from fine
+  grain. Near the FM threshold the demodulator throws clicks: white and black dashes with a
+  fading tail. Below it, only noise is left. The dropout compensator patches weak spots with
+  the line above for a few lines, the colour killer greys out the chroma before the luma
+  goes, and noisy sync makes lines drift sideways.
+- **HEAD SWITCH** is the hand-over between heads: the lines after it are displaced and the
+  TV's horizontal AFC pulls them back slowly, with a dip in RF at the switch.
+- **FUZZ** **Dropout** (except Shape: Tall) is oxide loss on the tape: short stretches of a
+  line with no RF, which come out as streaks with tails. **Bands** (Dots and Wide) are
+  creased tape where the RF collapses over whole lines; **Band glow** is how bright the
+  demodulator runs on noise.
+- **Snow** (Fuzz) is a TV on a weak or empty channel: RF noise through the envelope detector
+  of a negative-modulation receiver with AGC. It is grey with black and white specks; above
+  about half strength the colour killer drops the picture's colour and sync starts to slip.
+  **Snow coarse** narrows the video bandwidth and **Snow colour** defeats the colour killer.
+
+This replaced the earlier painted noise, so takes made before it that use these controls
+render differently.
+
 ### Streaks, tears and a shaking CRT
 
 These controls were added to existing filters; their defaults keep the
@@ -165,8 +200,8 @@ original look, so older takes render unchanged (except CRT Bloom's glow, reworke
   horizontal ones or **Smear**, and runs the dropout dashes the same way. **Streak px** sets
   their length; with Tall, **Columns px** lines the dashes up in regular columns
   (0 scatters them). **Bands** swallows whole horizontal bands of the picture in
-  blown-out static, from a few strips up to nearly the full frame at 1; the
-  static follows Shape (Wide streaks, Tall barcode, Dots snow). **Band px** sets
+  blown-out static, from a few strips up to nearly the full frame at 1 (tape RF loss for
+  Dots and Wide, a barcode texture for Tall; see *Analog static*). **Band px** sets
   their typical height, **Band Hz** how often they jump, and **Band glow** how
   white they burn.
   With **Shape: Smear**, bands become smeared light instead of grain: long ragged streaks,

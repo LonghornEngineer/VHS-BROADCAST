@@ -90,8 +90,10 @@ class DeckTests(unittest.TestCase):
         timeline.apply(.5, params)
         self.assertTrue((e.apply(frame, .5) == BLUE).all())
         timeline.apply(1.1, params)
-        snow = e.apply(frame, 1.1)
-        self.assertGreater(snow.std(), 40)                                  # snow, not picture
+        self.assertTrue((e.apply(frame, 1.1) == BLUE).all())                # still threading
+        timeline.apply(1.25, params)
+        snow = e.apply(frame, 1.25)
+        self.assertGreater(np.abs(snow.astype(int) - frame).mean(), 30)     # drum up, no tracking yet
         timeline.apply(3.0, params)
         np.testing.assert_array_equal(e.apply(frame, 3.0), frame)           # settled: untouched
         # A scrub straight into the settle matches playing up to it.
@@ -112,14 +114,26 @@ class DeckTests(unittest.TestCase):
 
     def test_search_bars_move_with_direction(self):
         timeline = deck_timeline([0], [2])
-        params, e = make(VCRDeckEffect, timeline, bars=1)
+        params, e = make(VCRDeckEffect, timeline, speed=3, bar_speed=1)     # one bar
         frame = np.full((180, 120, 3), 128, np.uint8)
         def bar_row(t):
             timeline.apply(t, params)
             out = e.apply(frame, t).astype(int)
             dev = np.abs(out - 128).mean(axis=(1, 2))
             return float((dev * np.arange(len(dev))).sum() / dev.sum())   # bar centre
-        self.assertGreater(bar_row(1.1), bar_row(1.0))                      # fast forward runs down
+        self.assertGreater(bar_row(.3), bar_row(.2))                        # fast forward runs down
+
+    def test_rewind_shows_more_bars_than_fast_forward(self):
+        # The head crosses speed-1 tracks per field in FF and speed+1 in REW.
+        def bars(mode):
+            timeline = deck_timeline([0], [mode])
+            params, e = make(VCRDeckEffect, timeline, speed=5, bar_speed=0)
+            frame = np.full((240, 160, 3), 128, np.uint8)
+            timeline.apply(.5, params)
+            dev = np.abs(e.apply(frame, .5).astype(int) - 128).mean(axis=(1, 2)) > 25
+            return int(np.count_nonzero(np.diff(dev.astype(int)) == 1) + dev[0])
+        self.assertEqual(bars(2), 2)
+        self.assertEqual(bars(3), 3)
 
 
 if __name__ == "__main__":

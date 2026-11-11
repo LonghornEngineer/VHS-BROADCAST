@@ -40,7 +40,7 @@ class MotionTests(unittest.TestCase):
         p = self.params.get("tracking.rollspeed")
         p.set_base(.5)
         p.audio = AudioMod(enabled=True, band="level", threshold=.5, ramp=0, rest=0)
-        self.params.get("tracking.jitter").set_base(0)
+        self.params.get("tracking.noise").set_base(0)                   # roll only, no band
         effect = self.effects["tracking"]
         effect.enabled_param().set_base(1)
         before = effect.apply(self.frame.copy(), 0)
@@ -64,8 +64,20 @@ class MotionTests(unittest.TestCase):
         self.assertAlmostEqual(self.params.motion_phase(p.id, 3), 3, places=5)
 
     def test_tracking_scroll_and_wobble_freeze_when_stopped(self):
+        # The band's noise is live, so follow where the band is rather than its pixels.
+        flat = np.full((200, 80, 3), 128, np.uint8)
+        tracking = self.effects["tracking"]
+        tracking.enabled_param().set_base(1)
+        self.params.get("tracking.skew").set_base(2)
+        def band(t):
+            dev = np.abs(tracking.apply(flat.copy(), t).astype(int) - 128).mean(axis=(1, 2))
+            return float((dev * np.arange(len(dev))).sum() / dev.sum())
+        before = band(7.25)
+        self.params.get("tracking.speed").set_base(0)
+        self.assertAlmostEqual(band(7.25), before, delta=4)
+        self.assertAlmostEqual(band(9), before, delta=4)
         frame = np.random.default_rng(4).integers(0, 256, (100, 80, 3), dtype=np.uint8)
-        for effect_id, rate_id in (("tracking", "tracking.speed"), ("wobble", "wobble.speed")):
+        for effect_id, rate_id in (("wobble", "wobble.speed"),):
             effect = self.effects[effect_id]
             effect.enabled_param().set_base(1)
             before = effect.apply(frame.copy(), 7.25)
