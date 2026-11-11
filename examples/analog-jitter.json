@@ -1,29 +1,94 @@
 {
   "version": 2,
   "source": null,
-  "order": ["noise", "tear", "bloom"],
+  "order": [
+    "noise",
+    "tear",
+    "bloom",
+    "crt_raster"
+  ],
   "parameters": {
     "text.enabled": 0,
     "bloom.enabled": 1,
     "bloom.amount": 0.5,
-    "bloom.shake": 1.2,
-    "bloom.line_jitter": 2,
-    "bloom.jumps": 0.4,
     "noise.grain": 0.6,
     "noise.dropout": 0.6,
     "noise.length": 16,
     "noise.columns": 12,
     "tear.amount": 0.8,
     "tear.count": 0.8,
-    "tear.step": 14
+    "tear.step": 14,
+    "crt_raster.enabled": 1,
+    "crt_raster.noise": 0,
+    "crt_raster.shake": 1.2,
+    "crt_raster.line_jitter": 2,
+    "crt_raster.jumps": 0.4
   },
   "timeline": {
     "tracks": {
-      "noise.enabled": {"t": [0, 2.5, 5], "v": [1, 1, 0], "interpolation": "hold"},
-      "noise.shape": {"t": [0, 2.5], "v": [1, 2], "interpolation": "hold"},
-      "tear.enabled": {"t": [0, 5, 10], "v": [0, 1, 0], "interpolation": "hold"},
-      "tear.direction": {"t": [0, 5, 7.5], "v": [0, 1, 0], "interpolation": "hold"},
-      "tear.shape": {"t": [0, 5, 7.5], "v": [0, 0, 1], "interpolation": "hold"}
+      "noise.enabled": {
+        "t": [
+          0,
+          2.5,
+          5
+        ],
+        "v": [
+          1,
+          1,
+          0
+        ],
+        "interpolation": "hold"
+      },
+      "noise.shape": {
+        "t": [
+          0,
+          2.5
+        ],
+        "v": [
+          1,
+          2
+        ],
+        "interpolation": "hold"
+      },
+      "tear.enabled": {
+        "t": [
+          0,
+          5,
+          10
+        ],
+        "v": [
+          0,
+          1,
+          0
+        ],
+        "interpolation": "hold"
+      },
+      "tear.direction": {
+        "t": [
+          0,
+          5,
+          7.5
+        ],
+        "v": [
+          0,
+          1,
+          0
+        ],
+        "interpolation": "hold"
+      },
+      "tear.shape": {
+        "t": [
+          0,
+          5,
+          7.5
+        ],
+        "v": [
+          0,
+          0,
+          1
+        ],
+        "interpolation": "hold"
+      }
     }
   }
 }

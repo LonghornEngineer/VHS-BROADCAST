@@ -11,6 +11,7 @@ import tempfile
 
 from .core.automation import Session, Timeline
 from .core.parameters import ParameterSet
+from .effects.stages import STAGES
 from .effects.vhs import default_effects
 
 API_VERSION = 1
@@ -26,14 +27,16 @@ def _model():
 def catalog() -> dict:
     """Discover exact effect/parameter IDs, bounds, choices and defaults."""
     _, effects, _, _ = _model()
+    # Retired effects and controls still load from old takes but are not offered here.
     return {"api_version": API_VERSION, "session_version": Session.VERSION,
-            "effects": [{"id": e.id, "label": e.label,
+            "stages": [{"id": key, "label": label, "description": blurb} for key, label, blurb in STAGES],
+            "effects": [{"id": e.id, "label": e.label, "stage": e.stage,
                          "settings": e.settings() if hasattr(e, "settings") else {},
                          "parameters": [{"id": p.id, "label": p.label, "default": p.default,
                                          "minimum": p.minimum, "maximum": p.maximum,
                                          "step": p.step, "choices": list(p.choices)}
-                                        for p in [e.enabled_param(), *e.own_params()]]}
-                        for e in effects]}
+                                        for p in [e.enabled_param(), *e.own_params()] if not p.legacy]}
+                        for e in effects if not e.legacy_of]}
 
 
 def _number(value, name):

@@ -19,6 +19,13 @@ choices and effect-specific settings. Use returned IDs instead of guessing from
 labels. Choice values are zero-based indices; enable an effect via `<id>.enabled`.
 Setting a slider does not implicitly enable its effect.
 
+Each effect also carries a `stage` (camera, digital, tape, receiver, screen, stylize,
+composite), and `stages` lists them in signal order with descriptions. Without an
+explicit `order`, a take runs effects stage by stage. Retired effects (wobble,
+static, interlace, bitcrush) and retired controls are left out of the catalog, but
+`create` and `validate` still accept them so older takes keep working; prefer the
+replacements listed in docs/effects.md.
+
 `create` accepts a partial native take with numeric parameter shorthand. It expands
 all controls to a complete native take. You can pipe JSON to `--spec -` or use a
 UTF-8/UTF-8-BOM file. Native takes accepted by `validate` and `render` use objects

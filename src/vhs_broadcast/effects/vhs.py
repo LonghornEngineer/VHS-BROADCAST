@@ -25,6 +25,7 @@ from .advanced import ADVANCED_EFFECTS
 class SignalEffect(Effect):
     id = "signal"
     label = "SIGNAL"
+    stage = "camera"
 
     def build(self, params):
         self.param("brightness", "Brightness", 0.0, -1.0, 1.0)
@@ -46,6 +47,7 @@ class SignalEffect(Effect):
 class SlewEffect(Effect):
     id = "slew"
     label = "SLEW / ALIGN"
+    stage = "tape"
 
     def build(self, params):
         self.param("smear", "Smear", 0.25, 0.0, 1.0)
@@ -79,6 +81,8 @@ class SlewEffect(Effect):
 class WobbleEffect(Effect):
     id = "wobble"
     label = "WOBBLE"
+    stage = "receiver"
+    legacy_of = "crt_raster"
 
     def build(self, params):
         self.param("amount", "Amount", 0.25, 0.0, 1.0)
@@ -105,6 +109,7 @@ class WobbleEffect(Effect):
 class TrackingEffect(Effect):
     id = "tracking"
     label = "TRACKING"
+    stage = "tape"
 
     def build(self, params):
         self.param("band", "Band Size", 0.15, 0.0, 0.5)
@@ -150,6 +155,7 @@ class TrackingEffect(Effect):
 class ChromaEffect(Effect):
     id = "chroma"
     label = "CHROMA"
+    stage = "tape"
 
     def build(self, params):
         # signed per-channel horizontal shift -> move just one colour if wanted
@@ -184,6 +190,8 @@ class ChromaEffect(Effect):
 class StaticEffect(Effect):
     id = "static"
     label = "TV STATIC"
+    stage = "receiver"
+    legacy_of = "noise"
 
     def build(self, params):
         self.param("alpha", "Alpha", 0.15, 0.0, 1.0)
@@ -191,6 +199,12 @@ class StaticEffect(Effect):
         self.param("tint", "Colour", 0.0, 0.0, 1.0)
 
     def process(self, frame, t, v):
+        return self.snow(frame, t, v["alpha"], v["coarse"], v["tint"])
+
+    @staticmethod
+    def snow(frame, t, alpha, coarse, tint):
+        """Blend random TV snow over the picture (shared with Fuzz's Snow controls)."""
+        v = {"alpha": alpha, "coarse": coarse, "tint": tint}
         if v["alpha"] < 1e-3:
             return frame
         h, w = frame.shape[:2]
@@ -216,6 +230,7 @@ class StaticEffect(Effect):
 class GhostEffect(Effect):
     id = "ghost"
     label = "GHOST"
+    stage = "receiver"
 
     def build(self, params):
         self.param("amount", "Amount", 0.35, 0.0, 1.0)
@@ -239,6 +254,7 @@ class GhostEffect(Effect):
 class HeadSwitchEffect(Effect):
     id = "headswitch"
     label = "HEAD SWITCH"
+    stage = "tape"
 
     def build(self, params):
         self.param("height", "Height", 0.05, 0.0, 0.2)
@@ -267,6 +283,7 @@ class HeadSwitchEffect(Effect):
 class LaserRotEffect(Effect):
     id = "laserrot"
     label = "LASER ROT"
+    stage = "tape"
 
     def build(self, params):
         self.param("density", "Density", 0.35, 0.0, 1.0)
@@ -323,6 +340,7 @@ class LaserRotEffect(Effect):
 class NoiseEffect(Effect):
     id = "noise"
     label = "FUZZ"
+    stage = "tape"
 
     def build(self, params):
         self.param("grain", "Grain", 0.3, 0.0, 1.0)
@@ -335,6 +353,10 @@ class NoiseEffect(Effect):
         self.param("band_px", "Band px", 60, 4, 360, step=1)
         self.param("band_rate", "Band Hz", 8, 0, 30)
         self.param("band_glow", "Band glow", .6)
+        # Formerly the separate TV STATIC effect.
+        self.param("snow", "Snow", 0)
+        self.param("snow_coarse", "Snow coarse", .2)
+        self.param("snow_tint", "Snow colour", 0)
 
     def process(self, frame, t, v):
         h, w = frame.shape[:2]
@@ -371,6 +393,8 @@ class NoiseEffect(Effect):
                         out[y:min(h, y + L), x] = 235
                     else:
                         out[y, x:min(w, x + L)] = 235
+        if v["snow"] > 1e-3:
+            out = StaticEffect.snow(out, t, v["snow"], v["snow_coarse"], v["snow_tint"])
         return out
 
     def _fuzz_bands(self, frame, t, v, shape):
@@ -509,10 +533,14 @@ class NoiseEffect(Effect):
 class ScanlinesEffect(Effect):
     id = "scanlines"
     label = "SCANLINES"
+    stage = "screen"
 
     def build(self, params):
         self.param("strength", "Strength", 0.3, 0.0, 1.0)
         self.param("vignette", "Vignette", 0.25, 0.0, 1.0)
+        # Formerly the separate INTERLACE effect.
+        self.param("interlace", "Interlace dim", 0.0, 0.0, 1.0)
+        self.param("comb", "Comb", 0.0, 0.0, 1.0)
         self._cache_key = None
         self._mask = None
 
@@ -528,6 +556,8 @@ class ScanlinesEffect(Effect):
         return mask
 
     def process(self, frame, t, v):
+        if v["interlace"] > 1e-3 or v["comb"] > 1e-3:
+            frame = InterlaceEffect.interlace(frame, t, v["interlace"], v["comb"])
         h, w = frame.shape[:2]
         key = (h, w, round(v["strength"], 3), round(v["vignette"], 3))
         if key != self._cache_key:
@@ -542,6 +572,7 @@ class ScanlinesEffect(Effect):
 class TearEffect(Effect):
     id = "tear"
     label = "TEARING"
+    stage = "tape"
 
     def build(self, params):
         self.param("amount", "Amount", 0.2, 0.0, 1.0)
@@ -604,6 +635,7 @@ class TearEffect(Effect):
 class TextOverlayEffect(Effect):
     id = "text"
     label = "OSD / TEXT"
+    stage = "camera"
 
     CLOCK_NONE = 0
     CLOCK_BLINK = 1        # unset-VCR blinking 12:00
@@ -755,24 +787,40 @@ class TextOverlayEffect(Effect):
 # --------------------------------------------------------------------------- #
 class DownsampleEffect(Effect):
     id = "downsample"
-    label = "DOWNSAMPLE"
+    label = "DOWNSCALE"
+    stage = "digital"
+
+    TARGETS = (None, 256, 320)
 
     def build(self, params):
         self.param("amount", "Amount", 0.4, 0.0, 1.0)
         self.param("fps", "FPS %", 100.0, 5.0, 100.0, step=1.0)  # temporal hold
+        # Appended controls; the defaults keep the original Amount-based pixelate.
+        self.choice("size", "Size", ("By amount", "256 wide (SNES)", "320 wide (VGA)", "Custom width"))
+        self.param("width", "Width px", 240, 32, 1920, step=1)
+        self.choice("scaling", "Scaling", ("Chunky", "Smooth"))
 
     def process(self, frame, t, v):
-        # spatial pixelate only; the temporal FPS hold is applied by the engine
+        # spatial resolution only; the temporal FPS hold is applied by the engine
         # before displaying the processed output
-        if v["amount"] < 1e-3:
-            return frame
         h, w = frame.shape[:2]
-        blk = 1 + int(v["amount"] * 15)
-        if blk <= 1:
-            return frame
-        small = cv2.resize(frame, (max(1, w // blk), max(1, h // blk)),
-                           interpolation=cv2.INTER_LINEAR)
-        return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+        size = int(v["size"])
+        if size == 0:
+            if v["amount"] < 1e-3:
+                return frame
+            blk = 1 + int(v["amount"] * 15)
+            if blk <= 1:
+                return frame
+            small = cv2.resize(frame, (max(1, w // blk), max(1, h // blk)),
+                               interpolation=cv2.INTER_LINEAR)
+        else:
+            target = self.TARGETS[size] if size < 3 else int(v["width"])
+            if target >= w:
+                return frame
+            small = cv2.resize(frame, (target, max(1, round(h * target / w))),
+                               interpolation=cv2.INTER_AREA)
+        up = cv2.INTER_LINEAR if int(v["scaling"]) == 1 else cv2.INTER_NEAREST
+        return cv2.resize(small, (w, h), interpolation=up)
 
 
 # --------------------------------------------------------------------------- #
@@ -781,6 +829,8 @@ class DownsampleEffect(Effect):
 class BitCrushEffect(Effect):
     id = "bitcrush"
     label = "BIT CRUSH"
+    stage = "digital"
+    legacy_of = "rgb_torture"
 
     def build(self, params):
         self.param("bits", "Bits", 5.0, 1.0, 8.0, step=1.0)
@@ -801,12 +851,20 @@ class BitCrushEffect(Effect):
 class InterlaceEffect(Effect):
     id = "interlace"
     label = "INTERLACE"
+    stage = "screen"
+    legacy_of = "scanlines"
 
     def build(self, params):
         self.param("strength", "Line Dim", 0.4, 0.0, 1.0)
         self.param("offset", "Comb", 0.3, 0.0, 1.0)
 
     def process(self, frame, t, v):
+        return self.interlace(frame, t, v["strength"], v["offset"])
+
+    @staticmethod
+    def interlace(frame, t, strength, offset):
+        """Field flicker and comb offset (shared with Scanlines' Interlace controls)."""
+        v = {"strength": strength, "offset": offset}
         w = frame.shape[1]
         out = frame.copy()
         field = int(t * 50.0) % 2          # ~50 Hz field flicker
@@ -826,6 +884,7 @@ class InterlaceEffect(Effect):
 class ScrambleEffect(Effect):
     id = "scramble"
     label = "SCRAMBLE"
+    stage = "receiver"
 
     def build(self, params):
         self.param("amount", "Desync", 0.6, 0.0, 1.0)      # horizontal line skew
@@ -880,6 +939,7 @@ class ScrambleEffect(Effect):
 class MotorEffect(Effect):
     id = "motor"
     label = "MOTOR  WOW/FLUTTER"
+    stage = "tape"
 
     def build(self, params):
         self.param("depth", "Depth", 0.0, 0.0, 0.5)
@@ -895,6 +955,7 @@ class EdgeRingEffect(Effect):
     """Bright/dark analogue enhancer halos, with a shifted ringing echo."""
     id = "edge_ring"
     label = "EDGE RING"
+    stage = "receiver"
 
     def build(self, params):
         self.param("amount", "Amount", 0.4)
@@ -916,6 +977,7 @@ class SolarizeEffect(Effect):
     """Fold highlights back into shadows for a bent colour-inverter look."""
     id = "solarize"
     label = "SOLARIZE"
+    stage = "stylize"
 
     def build(self, params):
         self.param("amount", "Amount", 0.5)
@@ -933,6 +995,7 @@ class SignalFoldEffect(Effect):
     """Video voltage overdrive folded into repeated colour contours."""
     id = "signal_fold"
     label = "SIGNAL FOLD"
+    stage = "stylize"
 
     def build(self, params):
         self.param("amount", "Amount", 0.35)
@@ -951,6 +1014,7 @@ class FrameMoveEffect(Effect):
     """Center-based camera transform with toroidal (tiled) image boundaries."""
     id = "frame_move"
     label = "FRAME MOVE / WRAP"
+    stage = "camera"
 
     def build(self, params):
         self.param("zoom", "Zoom", 1, .25, 4, step=.01)
@@ -988,15 +1052,16 @@ class BloomEffect(Effect):
     """Soft phosphor-like glow around bright highlights."""
     id = "bloom"
     label = "CRT BLOOM"
+    stage = "screen"
 
     def build(self, params):
         self.param("amount", "Amount", .35)
         self.param("threshold", "Cutoff", .65)
         self.param("radius", "Radius", .3)
-        # Appended controls, off by default: a filmed CRT that never sits still.
-        self.param("shake", "Shake px", 0, 0, 8)
-        self.param("line_jitter", "Line jitter px", 0, 0, 8)
-        self.param("jumps", "Jumps /s", 0, 0, 4)
+        # Retired: these moved to CRT RASTER / SYNC; kept so older takes render the same.
+        self.param("shake", "Shake px", 0, 0, 8, legacy=True)
+        self.param("line_jitter", "Line jitter px", 0, 0, 8, legacy=True)
+        self.param("jumps", "Jumps /s", 0, 0, 4, legacy=True)
 
     def process(self, frame, t, v):
         out = frame
@@ -1057,6 +1122,7 @@ class HueShiftEffect(Effect):
     """Chroma rotation with an optional continuous colour cycle."""
     id = "hue_shift"
     label = "HUE SHIFT"
+    stage = "stylize"
 
     def build(self, params):
         self.param("amount", "Mix", .75)
@@ -1077,6 +1143,7 @@ class PixelSortEffect(Effect):
     """Sort contiguous bright runs along scanlines, keeping dark boundaries."""
     id = "pixel_sort"
     label = "PIXEL SORT"
+    stage = "stylize"
 
     def build(self, params):
         self.param("amount", "Mix", .6)
@@ -1127,7 +1194,8 @@ class PixelSortEffect(Effect):
 def default_effects(params: ParameterSet) -> list[Effect]:
     from .glitch import CRTRasterEffect, RasterHoldEffect, RollingShutterEffect, SyncLossEffect
     from .retro import GameBoyEffect, LEDMatrixEffect, NESCorruptionEffect, RGBTortureEffect
-    return [
+    from .stages import signal_order
+    return signal_order([
         TextOverlayEffect(params),
         FrameMoveEffect(params),
         SignalEffect(params),
@@ -1162,4 +1230,4 @@ def default_effects(params: ParameterSet) -> list[Effect]:
         ScrambleEffect(params),
         MotorEffect(params),
         *[effect(params) for effect in ADVANCED_EFFECTS],
-    ]
+    ])

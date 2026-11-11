@@ -59,6 +59,7 @@ class TemporalEffect(Effect):
 class VideoFeedbackEffect(TemporalEffect):
     id = "feedback"
     label = "VIDEO FEEDBACK"
+    stage = "composite"
 
     def build(self, params):
         self.param("gain", "Gain", .65, 0, 1.25)
@@ -92,6 +93,7 @@ class VideoFeedbackEffect(TemporalEffect):
 class MotionSmearEffect(TemporalEffect):
     id = "motion_smear"
     label = "DATAMOSH / MOTION SMEAR"
+    stage = "digital"
 
     def build(self, params):
         self.param("block", "Block px", 16, 4, 96, step=1)
@@ -167,6 +169,7 @@ class MotionSmearEffect(TemporalEffect):
 class CompositeEffect(Effect):
     id = "composite"
     label = "COMPOSITE ARTIFACTS"
+    stage = "receiver"
 
     def build(self, params):
         self.param("dots", "Dot Crawl", .35)
@@ -202,6 +205,7 @@ class CompositeEffect(Effect):
 class PaletteDitherEffect(Effect):
     id = "palette"
     label = "PALETTE / DITHER"
+    stage = "stylize"
     BAYER = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]], np.float32) / 16 - .46875
     EGA_RGB = np.array([[0, 0, 0], [0, 0, 170], [0, 170, 0], [0, 170, 170],
                        [170, 0, 0], [170, 0, 170], [170, 85, 0], [170, 170, 170],
@@ -422,6 +426,7 @@ class PaletteDitherEffect(Effect):
 class TemporalDisplacementEffect(TemporalEffect):
     id = "time_displace"
     label = "TEMPORAL DISPLACEMENT"
+    stage = "composite"
     MEMORY_BYTES = 96 * 1024 * 1024
 
     def build(self, params):
@@ -454,6 +459,7 @@ class TemporalDisplacementEffect(TemporalEffect):
 class BlockCorruptionEffect(TemporalEffect):
     id = "block_corrupt"
     label = "BLOCK CORRUPTION"
+    stage = "digital"
 
     def build(self, params):
         self.param("block", "Block px", 32, 8, 128, step=1)
@@ -525,6 +531,7 @@ class BlockCorruptionEffect(TemporalEffect):
 class PhosphorPersistenceEffect(TemporalEffect):
     id = "phosphor"
     label = "PHOSPHOR PERSISTENCE"
+    stage = "screen"
 
     def build(self, params):
         self.param("red", "R Decay s", .3, .01, 3)
@@ -546,6 +553,7 @@ class PhosphorPersistenceEffect(TemporalEffect):
 class CRTGeometryEffect(Effect):
     id = "crt_geometry"
     label = "CRT GEOMETRY / MASK"
+    stage = "screen"
 
     def build(self, params):
         self.param("curve", "Curvature", .12, 0, .5)
@@ -582,6 +590,7 @@ class CRTGeometryEffect(Effect):
 class RFInterferenceEffect(Effect):
     id = "rf_interference"
     label = "RF / HUM BARS"
+    stage = "receiver"
 
     def build(self, params):
         self.param("frequency", "Frequency", 8, 1, 60)
@@ -611,6 +620,7 @@ class RFInterferenceEffect(Effect):
 class LumaKeyEffect(Effect):
     id = "luma_key"
     label = "LUMA KEY / THRESHOLD"
+    stage = "stylize"
     requires_source = True
 
     def __init__(self, params):
@@ -688,6 +698,7 @@ class LineDitherEffect(Effect):
     """Thin parallel lines bent sideways by brightness, drawn only where the picture is lit."""
     id = "line_dither"
     label = "LINE DITHER"
+    stage = "stylize"
     # BGR line colours; index 0 keeps the source colour.
     COLORS = np.array([[0, 0, 0], [255, 255, 255], [255, 150, 110],
                        [120, 255, 140], [60, 180, 255]], np.float32)
@@ -759,6 +770,7 @@ class FMVEffect(TemporalEffect):
     """Early-90s CD-ROM video: low-res vector-quantised blocks, 8-bit colour and skipped blocks."""
     id = "fmv"
     label = "FMV / CD-ROM VIDEO"
+    stage = "digital"
 
     def build(self, params):
         self.param("amount", "Mix", 1)

@@ -26,8 +26,10 @@ class AgentApiTests(unittest.TestCase):
         result = catalog()
         ids = [p['id'] for e in result['effects'] for p in e['parameters']]
         params = ParameterSet()
-        default_effects(params)
-        self.assertEqual(set(ids), {p.id for p in params.all()})
+        effects = default_effects(params)
+        retired = {p.id for e in effects for p in [e.enabled_param(), *e.own_params()]
+                   if e.legacy_of or p.legacy}
+        self.assertEqual(set(ids), {p.id for p in params.all()} - retired)
         self.assertEqual(len(ids), len(set(ids)))
         code, data = self.call(['catalog'])
         self.assertEqual(code, 0)

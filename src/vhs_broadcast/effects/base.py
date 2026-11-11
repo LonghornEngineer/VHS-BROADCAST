@@ -22,6 +22,11 @@ class Effect:
     id: str = "effect"
     #: human label for the UI panel
     label: str = "Effect"
+    #: signal-order stage (see effects/stages.py)
+    stage: str = "stylize"
+    #: id of the effect that now covers this one; set on retired effects that
+    #: stay registered only so older takes keep rendering identically
+    legacy_of: str = ""
     requires_source = False
 
     def reset_state(self):
@@ -55,10 +60,11 @@ class Effect:
 
     # ---- helpers ----------------------------------------------------------
     def param(self, short_id: str, label: str, value: float,
-              lo: float = 0.0, hi: float = 1.0, step: float = 0.01) -> Parameter:
+              lo: float = 0.0, hi: float = 1.0, step: float = 0.01,
+              legacy: bool = False) -> Parameter:
         p = self.params.add(Parameter(
             id=f"{self.id}.{short_id}", label=label,
-            value=value, minimum=lo, maximum=hi, step=step,
+            value=value, minimum=lo, maximum=hi, step=step, legacy=legacy,
         ))
         self._own.append(p)
         return p
