@@ -682,6 +682,8 @@ class TextOverlayEffect(Effect):
         self.param("x", "Pos X", 0.05, 0.0, 1.0)
         self.param("y", "Pos Y", 0.85, 0.0, 1.0)
         self.param("glow", "Glow", 0.4, 0.0, 1.0)
+        # A hard black edge, as camcorder OSDs drew, keeps text readable over snow.
+        self.param("edge", "Black edge", 0.0, 0.0, 1.0)
         # Clock is right-anchored, tag left-anchored; defaults match the original fixed layout.
         self.param("clock_x", "Clock X", 0.97, 0.0, 1.0)
         self.param("clock_y", "Clock Y", 0.06, 0.0, 1.0)
@@ -757,11 +759,12 @@ class TextOverlayEffect(Effect):
         g = lambda k: self.params.get(f"text.{k}").evaluate(t)  # noqa: E731
         scale, x, y, glow = g("scale"), g("x"), g("y"), g("glow")
         base = int(48 * scale * (w / 720.0))
+        edge = int(round(g("edge") * max(1, base * .08)))
         state, date_anchor = self.state_at(t)
         items = []
         if state["custom_text"]:
             items.append(dict(text=state["custom_text"], x=int(x * w) + 8,
-                              y=int(y * h), size_px=base, glow=glow,
+                              y=int(y * h), size_px=base, glow=glow, edge=edge,
                               anchor="la"))
         clk = None
         show = True
@@ -786,11 +789,11 @@ class TextOverlayEffect(Effect):
             clk = f"{int(t // 60):02d}:{int(t % 60):02d}:{int((t * 100) % 100):02d}"
         if clk and show:
             items.append(dict(text=clk, x=round(w * g("clock_x")), y=round(h * g("clock_y")),
-                              size_px=base, glow=glow, anchor="ra"))
+                              size_px=base, glow=glow, edge=edge, anchor="ra"))
         if state["corner_text"]:
             items.append(dict(text=state["corner_text"], x=round(w * g("tag_x")),
                               y=round(h * g("tag_y")), size_px=int(base * 0.8),
-                              glow=glow, anchor="la"))
+                              glow=glow, edge=edge, anchor="la"))
         return items
 
     def process(self, frame, t, v):
