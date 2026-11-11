@@ -188,6 +188,11 @@ experiment was removed.
 
 ## Preview, rendering and live output
 
+**COMPARE** splits the preview: the effect on the left, the untouched source on the right.
+Drag across the picture to move the divider. **UNDO** / **REDO** (Ctrl+Z, Ctrl+Shift+Z or
+Ctrl+Y) step back through control changes; one slider drag is one step, and chain toggles and
+reorders count too. While the keyframe editor has focus, the same keys undo keyframe edits.
+
 **RENDER** offers full resolution or your current processing width/scale.
 Exports replace the destination only after completion. Cancel stops at a processing
 boundary; audio preparation/muxing may finish first. Exporting over the source is blocked.
