@@ -132,7 +132,7 @@ Try `examples/camcorder-deck.json`.
   bright scenes as the high voltage sags), **V / H collapse** (down to one bright line),
   **V / H linearity** (one side stretched, the other squashed, folding over past about
   0.6), **Convergence**, **Purity** (a magnetised mask's colour blotches), **Retrace**
-  (flyback lines and lifted black), **Video drive** (an overdriven amp burns out the
+  (lifted black, and the vertical flyback's faint lines, all rising left to right), **Video drive** (an overdriven amp burns out the
   whites; dark lines that fall into the sync tear sideways) and **Guns** (a dead or shorted
   gun). Hold and sync faults stay in CRT Raster / Sync. Everything can be keyed or driven by
   audio, so the set can be played.
@@ -243,17 +243,17 @@ These controls were added to existing filters; their defaults keep the
 original look, so older takes render unchanged (except CRT Bloom's glow, reworked below).
 
 - **FUZZ** — **Shape** turns the grain into **Tall** vertical streaks, **Wide**
-  horizontal ones or **Smear**, and runs the dropout dashes the same way. **Streak px** sets
+  horizontal ones or **Tape damage**, and runs the dropout dashes the same way. **Streak px** sets
   their length; with Tall, **Columns px** lines the dashes up in regular columns
   (0 scatters them). **Bands** swallows whole horizontal bands of the picture in
   blown-out static, from a few strips up to nearly the full frame at 1 (tape RF loss for
   Dots and Wide, a barcode texture for Tall; see *Analog static*). **Band px** sets
   their typical height, **Band Hz** how often they jump, and **Band glow** how
   white they burn.
-  With **Shape: Smear**, bands become smeared light instead of grain: long ragged streaks,
-  rows of dashes, clusters of glowing dots and tapered comets, with the picture showing
-  through between them;
-  **Streak px** setting how long they run. Try `examples/smear-fuzz.json`.
+  With **Shape: Tape damage** (formerly Smear), bands are a chewed stretch of tape: clusters
+  of oxide dropouts, each on its own scan line, starting hard with a bright noisy flash and
+  recovering along a fading tail as the FM carrier returns; **Streak px** sets their typical
+  length. Its grain is worn-tape FM grain. Try `examples/smear-fuzz.json`.
 
 - **TEARING** — **Direction: Vertical** shifts tall bands up and down instead of
   rows sideways. **Shape: Zigzag** steps rows sideways in a sawtooth so vertical

@@ -408,7 +408,7 @@ class NoiseEffect(Effect):
         self.param("grain", "Grain", 0.3, 0.0, 1.0)
         self.param("dropout", "Dropout", 0.1, 0.0, 1.0)
         # Appended controls; Dots keeps the original round grain.
-        self.choice("shape", "Shape", ("Dots", "Tall", "Wide", "Smear"))
+        self.choice("shape", "Shape", ("Dots", "Tall", "Wide", "Tape damage"))
         self.param("length", "Streak px", 12, 2, 128, step=1)
         self.param("columns", "Columns px", 0, 0, 64, step=1)
         self.param("bands", "Bands", 0)
@@ -430,11 +430,17 @@ class NoiseEffect(Effect):
             rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
             if shape == 0:
                 noise = rng.normal(0, v["grain"] * 40, (h, w, 1)).astype(np.float32)
-            elif shape == 3:
-                noise = self._smear_field(rng, h, w, int(v["length"]))[..., None] * v["grain"] * 60
+            if shape == 3:
+                # Worn tape: the whole picture plays back with a weaker carrier, so FM
+                # grain rises and, when heavy, clicks start to show.
+                env = np.full((h, 1), 1 - .78 * v["grain"], np.float32)
+                out = fm_playback(out, env, rng, doc=False, sync=0)
             else:
-                noise = self._streak_grain(rng, h, w, int(v["length"]), shape == 1) * v["grain"] * 40
-            out = np.clip(out.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+                if shape == 0:
+                    noise = rng.normal(0, v["grain"] * 40, (h, w, 1)).astype(np.float32)
+                else:
+                    noise = self._streak_grain(rng, h, w, int(v["length"]), shape == 1) * v["grain"] * 40
+                out = np.clip(out.astype(np.float32) + noise, 0, 255).astype(np.uint8)
         if v["dropout"] > 1e-3:
             rng = np.random.default_rng((int(t * 1000) ^ 0x5bd1e995) & 0xFFFFFFFF)
             tall = shape == 1                                # Tall keeps its stylised columns
@@ -481,7 +487,7 @@ class NoiseEffect(Effect):
             top = int(rng.integers(-height // 2, h))
             inside[max(0, top):min(h, top + height)] = True
         if shape == 3:
-            return self._smear_bands(frame, t, v, inside)
+            return self._damage_bands(frame, t, v, inside)
         rows = np.flatnonzero(inside)
         if not len(rows):
             return frame
@@ -512,88 +518,44 @@ class NoiseEffect(Effect):
         out[rows] = np.clip(picture * (1 - mix) + static * mix, 0, 255).astype(np.uint8)
         return out
 
-    @staticmethod
-    def _smear_field(rng, h, w, length):
-        """Amorphous horizontal smears: stretched soft blobs, ragged edges and sparkles, ~[-1, 2]."""
-        # Streak px sets blob length: 12 (default) gives blobs ~1/8 of the width.
-        across = max(3, int(w / (length * 7) + 1))
-        blobs = np.zeros((h, w), np.float32)
-        for rows, cols, weight in ((h / 22, across, .75), (h / 55, across * 2.5, .45)):
-            coarse = rng.normal(0, 1, (max(2, int(rows)), max(2, int(cols)))).astype(np.float32)
-            blobs += cv2.resize(coarse, (w, h), interpolation=cv2.INTER_CUBIC) * weight
-        # Ragged edges: fine streaky detail smeared along the scan direction.
-        fine = rng.normal(0, 1, (h, w)).astype(np.float32)
-        fine = cv2.blur(fine, (max(3, w // 60), 1)) * 2
-        field = blobs + fine * .2
-        sparkle = (rng.random((h, w)) > .985).astype(np.float32)
-        sparkle = cv2.blur(sparkle, (5, 1)) * 4
-        return field + sparkle
+    def _damage_bands(self, frame, t, v, inside):
+        """Damaged tape: clusters of oxide dropouts, each on its own scan line.
 
-    def _smear_bands(self, frame, t, v, inside):
-        """Bands of smeared light: streaks, dash rows, dot clusters and comets on a grey wash."""
+        A dropout starts hard where the coating is missing; the FM demodulator throws
+        a bright, noisy flash there, then recovers along a fading tail as the carrier
+        comes back - the white comets of a chewed tape. Streak px sets their typical
+        length and Band glow how bright the demodulator runs on noise.
+        """
         h, w = frame.shape[:2]
-        tick = math.floor(self.params.motion_phase("noise.band_rate", t))
-        layout = np.random.default_rng((tick * 2654435761 + 99) & 0xFFFFFFFF)
-        light = self._smear_layer(layout, h, w, v["length"] / 12)
-        # Fresh flicker every frame so the static stays alive between layout jumps.
-        flicker = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
-        light *= .85 + .3 * flicker.random((h, 1)).astype(np.float32)
-        unit = w / 720
-        light = cv2.GaussianBlur(light, (0, 0), sigmaX=4 * unit, sigmaY=1.2 * unit)
-        light = light + cv2.GaussianBlur(light, (0, 0), sigmaX=14 * unit, sigmaY=5 * unit) * .7   # halo
-        glow = v["band_glow"]
-        tint = np.array([1.0, .96, .93], np.float32)            # BGR: slightly cool white light
-        static = 255 * tint
-        # Soft row membership so band edges are uneven, not ruler-straight.
-        rows = cv2.GaussianBlur(inside.astype(np.float32)[:, None], (0, 0), max(1.0, h / 160))[:, 0]
-        # The picture shows through between the smears; only the light itself covers it.
-        mix = np.clip(rows[:, None] * light * (.8 + .5 * glow), 0, 1)[..., None]
-        out = frame.astype(np.float32) * (1 - mix) + static * mix
-        return np.clip(out, 0, 255).astype(np.uint8)
-
-    @staticmethod
-    def _smear_layer(rng, h, w, stretch):
-        """Paint smeared-light elements line group by line group, brightness 0..1."""
-        u = h / 720
-        layer = np.zeros((h, w), np.float32)
-        y = 0
-        while y < h:
-            gh = max(3, int(rng.integers(6, 28) * u))
-            kind = rng.choice(5, p=(.36, .16, .28, .12, .08))
-            mid = y + gh // 2
-            if kind == 0:                                   # long thin streaks
-                for _ in range(int(rng.integers(1, 4))):
-                    x0 = int(rng.integers(-w // 4, w))
-                    length = int(rng.uniform(.1, .6) * w * stretch)
-                    cv2.rectangle(layer, (x0, y), (x0 + length, y + max(1, int(gh * .8))), float(rng.uniform(.6, 1)), -1)
-            elif kind == 1:                                 # row of evenly spaced dashes
-                step = max(6, int(rng.integers(14, 32) * u))
-                x0 = int(rng.integers(0, w // 2))
-                x1 = x0 + int(rng.uniform(.3, .8) * w * stretch)
-                for x in range(x0, min(w, x1), step):
-                    cv2.rectangle(layer, (x, mid - gh // 4), (x + int(step * .55), mid + gh // 4), .85, -1)
-            elif kind == 2:                                 # cluster of soft round dots
-                cx = int(rng.integers(0, w))
-                for _ in range(int(rng.integers(3, 14))):
-                    x = int(cx + rng.normal(0, w * .08 * stretch))
-                    r = max(2, int(gh * rng.uniform(.35, .7)))
-                    cv2.circle(layer, (x, mid), r, float(rng.uniform(.6, 1)), -1)
-            elif kind == 3:                                 # tapered comet smear
-                length = int(rng.uniform(.25, .5) * w * stretch)
-                x0 = int(rng.integers(-length // 3, w - length // 3))
-                tall = gh * 2
-                patch = np.zeros((tall, max(2, length)), np.float32)
-                cv2.ellipse(patch, (length // 3, tall // 2), (length // 2, tall // 2), 0, 0, 360, 1.0, -1)
-                patch *= np.linspace(1, .15, patch.shape[1], dtype=np.float32)[None, :]
-                ys, xs = slice(max(0, y), min(h, y + tall)), slice(max(0, x0), min(w, x0 + length))
-                sub = patch[ys.start - y:ys.stop - y, xs.start - x0:xs.stop - x0]
-                if sub.size:
-                    layer[ys, xs] = np.maximum(layer[ys, xs], sub)
-            y += gh + int(rng.integers(0, 6) * u)           # kind 4: leave the group dark
-        # Ragged, uneven brightness along each element, like light smeared by a bad signal.
-        ragged = cv2.GaussianBlur(rng.random((h, w)).astype(np.float32), (0, 0), sigmaX=8 * u, sigmaY=.6 * u)
-        ragged = np.clip((ragged - ragged.mean()) * 9 + .85, .25, 1.3)
-        return layer * ragged
+        rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)   # the tape moves on every frame
+        unit = max(1.0, w / 640)
+        # Damage thins out toward a band's edges instead of stopping at a line.
+        density = cv2.GaussianBlur(inside.astype(np.float32)[:, None], (1, 0), sigmaX=.01,
+                                   sigmaY=max(1.0, h / 120))[:, 0]
+        env = np.ones((h, w), np.float32)
+        mean = max(3.0, v["length"] * 3 * unit)
+        for y in np.flatnonzero(density > .03):
+            for _ in range(rng.poisson(2.2 * density[y])):
+                start = int(rng.integers(-w // 8, w))
+                length = int(np.clip(rng.lognormal(np.log(mean), .7), 3, w * .6))
+                tail = int(length * .6 + 6 * unit)
+                lo, hi = max(0, start), min(w, start + length)
+                if hi <= 0:
+                    continue                                # wholly off the left edge
+                if hi > lo:
+                    env[y, lo:hi] = 0
+                if hi < w:
+                    end = min(w, hi + tail)
+                    ramp = np.linspace(0, 1, tail + 1, dtype=np.float32)[1:end - hi + 1]
+                    env[y, hi:end] = np.minimum(env[y, hi:end], ramp)
+                if length > 12 * unit and y + 1 < h and rng.random() < .35:
+                    # Long dropouts often reach into the next line, shorter there.
+                    cut = lo + (hi - lo) // 3
+                    env[y + 1, cut:hi] = np.minimum(env[y + 1, cut:hi], .1)
+        if env.min() > .97:
+            return frame
+        level = 120 + 110 * v["band_glow"]
+        return fm_playback(frame, env, rng, doc=False, sync=0, level=level)
 
     @staticmethod
     def _streak_grain(rng, h, w, length, tall):
