@@ -10,13 +10,31 @@ order, and agents see each effect's `stage` in `vhs-agent catalog`.
 
 | Stage | Effects |
 | --- | --- |
-| Camera | OSD / Text, Frame Move / Wrap, Signal, Rolling Shutter |
+| Camera | OSD / Text, Camcorder, Frame Move / Wrap, Signal, Rolling Shutter |
 | Digital | Raster / Pixel Hold, Sync Loss, Downscale, Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
-| Tape / VCR | Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
+| Tape / VCR | VCR Deck, Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
 | Receiver / TV | Edge Ring, CRT Raster / Sync, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
 | CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask |
 | Stylize | Solarize, Signal Fold, Hue Shift, Pixel Sort, Game Boy, LED Matrix, Tile Scramble, RGB Channels / Bit Crush, Palette / Dither, Luma Key, Line Dither |
 | Composite | Video Feedback, Temporal Displacement |
+
+### Camcorder and VCR deck
+
+- **CAMCORDER** (Camera stage) is everything a 90s camcorder did before the tape:
+  **Fisheye** (a VX1000-style adapter: the centre bulges while the corners stay pinned),
+  **Vignette**, **Auto exposure** (a damped iris that overshoots and pumps when the scene's
+  brightness changes; **AE speed Hz**), **White balance** (starts at the daylight preset and
+  slowly corrects toward neutral, so casts linger after cuts, plus a slow warm/cool drift),
+  **Handheld** shake with **Handheld speed**, **Edge enhance** halos and **Black level**.
+- **VCR DECK** (Tape stage) works like pressing the machine's buttons: keyframe **Mode** to
+  Play, Pause (the held frame shudders with a noise bar; **Pause jitter**), Fast forward or
+  Rewind (noise bars run down or up; **Search bars**, **Bar speed**, **Bar noise**) and Stop
+  (the blue screen). Play after Stop runs the tape-loading settle: snow, then the picture
+  rolls into vertical hold over **Settle s**. After a search the bars fade out; out of Pause
+  the tape simply resumes. Transitions are timed from the mode's keyframes, so scrubbing,
+  preview and render agree. The footage itself plays at normal speed.
+
+Try `examples/camcorder-deck.json`.
 
 ### Merged effects
 
