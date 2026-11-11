@@ -191,25 +191,30 @@ class CircuitBendEffect(Effect):
 
     @staticmethod
     def _retrace(frame, t, amount):
-        """Screen voltage too high: black lifts and the vertical flyback's lines show."""
+        """Screen voltage too high: black lifts and the vertical flyback shows.
+
+        The beam flies from the bottom back to the top in about ten line times while
+        the horizontal scan keeps running, so it draws ten or so faint lines, every one
+        rising left to right (the right-to-left returns stay blanked). It is stray beam
+        light added to the picture: plain on dark scenes, lost on bright ones.
+        """
         h, w = frame.shape[:2]
         f = frame.astype(np.float32)
         f = f * (1 - amount * .15) + amount * 38                       # lifted black
-        # The beam flies back from bottom to top in ~20 lines' time while still sweeping
-        # sideways, so it draws a handful of shallow zigzag lines up the screen.
         layer = np.zeros((h, w), np.float32)
-        lines = 14
-        for k in range(lines):
-            y0 = h - k * h / lines
-            y1 = y0 - h / lines
-            if k % 2 == 0:
-                p0, p1 = (0, int(y0)), (w - 1, int(y1))
-            else:
-                p0, p1 = (w - 1, int(y0)), (0, int(y1))
-            cv2.line(layer, p0, p1, 1.0, max(1, int(round(w / 640))), cv2.LINE_AA)
-        layer = cv2.GaussianBlur(layer, (0, 0), max(.6, w / 900))
+        sweeps = 10
+        for k in range(sweeps):
+            y0 = h - k * h / sweeps                                    # each sweep starts lower left
+            y1 = y0 - h / sweeps                                       # and ends one step higher, right
+            cv2.line(layer, (0, int(y0)), (w - 1, int(y1)), 1.0, 1, cv2.LINE_AA)
+        # The beam is moving fast, so the lines are thin and soft, brightest where the
+        # sweep starts and fading as it crosses.
+        fade = np.linspace(1, .55, w, dtype=np.float32)[None, :]
+        layer = cv2.GaussianBlur(layer * fade, (0, 0), max(.5, w / 1280))
         shimmer = .85 + .15 * math.sin(t * 60)
-        f += layer[..., None] * 90 * amount * shimmer
+        light = layer[..., None] * 60 * amount * shimmer
+        # Added light shows against what is already lit: little on white, plain on black.
+        f += light * (1 - f / 255 * .8)
         return np.clip(f, 0, 255).astype(np.uint8)
 
     @staticmethod
