@@ -50,7 +50,11 @@ class VideoWriter:
         rate = Fraction(fps).limit_denominator(1001)
         try:
             stream = self._container.add_stream("libx264", rate=rate)
-            stream.options = {"crf": "14", "preset": "medium"}
+            # mbtree=0: libx264's macroblock-tree pass has AVX-512 routines that
+            # read uninitialised scratch memory, so the I-frame's QP offsets (and
+            # every frame referencing it) varied with whatever was on the heap.
+            # Without it the same frames always encode to the same bitstream.
+            stream.options = {"crf": "14", "preset": "medium", "x264-params": "mbtree=0"}
         except (av.FFmpegError, ValueError):
             stream = self._container.add_stream("mpeg4", rate=rate)
             stream.options = {"qscale": "2"}

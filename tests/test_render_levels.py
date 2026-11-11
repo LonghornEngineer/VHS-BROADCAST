@@ -33,6 +33,20 @@ class RenderLevelTests(unittest.TestCase):
             patch = decoded[30:66, k * 32 + 8:(k + 1) * 32 - 8].astype(float).mean()
             self.assertAlmostEqual(patch, level, delta=1.2, msg=f"level {level} came back as {patch:.1f}")
 
+    def test_h264_writer_disables_mbtree_for_repeatable_output(self):
+        # libx264's AVX-512 mbtree code reads uninitialised memory, which made
+        # identical renders differ now and then; the writer must keep it off.
+        from vhs_broadcast.core.video_writer import VideoWriter
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "out.mp4"
+            writer = VideoWriter(str(output), 10, (64, 48))
+            for level in (40, 200):
+                writer.write(np.full((48, 64, 3), level, np.uint8))
+            writer.release()
+            data = output.read_bytes()
+        if b"x264" in data:
+            self.assertIn(b" mbtree=0 ", data)
+
 
 
 
