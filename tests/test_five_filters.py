@@ -99,3 +99,15 @@ class PixelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OsdEdgeTests(unittest.TestCase):
+    def test_black_edge_outlines_the_text_and_defaults_off(self):
+        grey = np.full((120, 320, 3), 200, np.uint8)
+        plain = make("text")
+        off = plain.apply(grey, 0)
+        self.assertEqual(plain.params.get("text.edge").value, 0)
+        edged = make("text", edge=1).apply(grey, 0)
+        # The edge adds black around the letters; without it the darkest text pixels stay light.
+        self.assertLess(int(edged.min()), 40)
+        self.assertGreater((edged < 40).sum(), (off < 40).sum() + 50)

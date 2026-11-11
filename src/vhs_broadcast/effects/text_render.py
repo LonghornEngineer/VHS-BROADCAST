@@ -158,12 +158,13 @@ def _measure(segs, font, icon_w, gap):
     return w
 
 
-def _render_line(draw, segs, x0, y, font, fill, icon_w, icon_h, ascent, gap):
+def _render_line(draw, segs, x0, y, font, fill, icon_w, icon_h, ascent, gap, edge=0):
     x = x0
     iy0 = y + (ascent - icon_h) / 2
     for kind, val in segs:
         if kind == "t":
-            draw.text((x, y), val, font=font, fill=fill, anchor="la")
+            draw.text((x, y), val, font=font, fill=fill, anchor="la",
+                      stroke_width=edge, stroke_fill=(0, 0, 0, 255))
             try:
                 x += font.getlength(val)
             except Exception:
@@ -175,7 +176,7 @@ def _render_line(draw, segs, x0, y, font, fill, icon_w, icon_h, ascent, gap):
 
 @lru_cache(maxsize=128)
 def _render_tile(text: str, size: int, glow_q: float, color: tuple,
-                 font_path: str):
+                 font_path: str, edge: int = 0):
     """Render one text string to an RGBA tile (cached). Returns
     (rgba_uint8_array, total_width, margin). Position is applied by the caller,
     so a static label/tag is rendered once and reused every frame."""
@@ -188,7 +189,7 @@ def _render_tile(text: str, size: int, glow_q: float, color: tuple,
     total = _measure(segs, font, icon_w, gap)
     if total <= 0:
         return None, 0, 0
-    margin = int(4 + 6 * glow_q)
+    margin = int(4 + 6 * glow_q) + edge
     tw = int(total) + 2 * margin
     th = int(ascent + desc) + 2 * margin
     tile = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
@@ -201,7 +202,7 @@ def _render_tile(text: str, size: int, glow_q: float, color: tuple,
         gl = gl.filter(ImageFilter.GaussianBlur(radius=2 + 4 * glow_q))
         tile.alpha_composite(gl)
     _render_line(d, segs, margin, margin, font, (*color, 255),
-                 icon_w, icon_h, ascent, gap)
+                 icon_w, icon_h, ascent, gap, edge)
     return np.asarray(tile), int(total), margin
 
 
@@ -222,7 +223,8 @@ def draw_texts(frame_bgr: np.ndarray, items, font_path: str) -> np.ndarray:
         size = max(6, int(it.get("size_px", 24)))
         color = tuple(it.get("color", (235, 235, 235)))
         glow_q = round(float(it.get("glow", 0.0)), 2)
-        arr, total, margin = _render_tile(text, size, glow_q, color, font_path)
+        edge = int(it.get("edge", 0))
+        arr, total, margin = _render_tile(text, size, glow_q, color, font_path, edge)
         if arr is None or total <= 0:
             continue
         th, tw = arr.shape[:2]
