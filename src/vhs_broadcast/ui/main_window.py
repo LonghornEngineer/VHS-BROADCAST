@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QDateTimeEdit,
     QMainWindow, QMenu, QMessageBox, QProgressDialog, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QSplitter, QStackedWidget, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import config as C
@@ -32,6 +32,7 @@ from .widgets.transport import Transport
 from .widgets.video_view import VideoView
 from .widgets.audio_meter import AudioMeter
 from .widgets.chain_list import ChainList
+from .widgets.rack import ModuleLibrary, Rack
 from .widgets.keyframes import KeyframeEditor
 
 
@@ -109,11 +110,29 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         outer.setContentsMargins(8, 6, 8, 6)
 
+        title_row = QHBoxLayout()
         title = QLabel(C.APP_NAME); title.setObjectName("Title")
-        outer.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        # Classic: every effect as a panel of sliders. Modular: the chain as a rack of
+        # modules with dials. Both edit the same parameters.
+        self.classic_btn = QPushButton("[ classic ]")
+        self.modular_btn = QPushButton("[ modular ]")
+        for button, modular in ((self.classic_btn, False), (self.modular_btn, True)):
+            button.setObjectName("ModeBtn")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, m=modular: self._set_modular(m))
+            title_row.addWidget(button)
+        self.classic_btn.setChecked(True)
+        outer.addLayout(title_row)
 
-        body = QHBoxLayout()
-        outer.addLayout(body, 1)
+        self.main_split = QSplitter(Qt.Vertical)
+        self.main_split.setChildrenCollapsible(False)
+        body_widget = QWidget()
+        body = QHBoxLayout(body_widget)
+        body.setContentsMargins(0, 0, 0, 0)
+        self.main_split.addWidget(body_widget)
+        outer.addWidget(self.main_split, 1)
 
         # The handle divides the preview/transport and timeline evenly by default.
         self.left_splitter = QSplitter(Qt.Vertical)
@@ -297,8 +316,23 @@ class MainWindow(QMainWindow):
                 row.keyframeRequested.connect(self._add_parameter_key)
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-        right.addWidget(self.tabs)
+        self.right_stack = QStackedWidget()
+        self.right_stack.addWidget(self.tabs)
+        self.library = ModuleLibrary(lambda: self.effects, hidden=self._hidden_legacy)
+        self.library.toggled.connect(self._toggle_chain)
+        self.right_stack.addWidget(self.library)
+        right.addWidget(self.right_stack)
         body.addLayout(right, 3)
+
+        self.rack = Rack(lambda: self.effects, self._reorder_by_hand, self._toggle_chain,
+                         self.timeline, hidden=self._hidden_legacy)
+        self.rack.keyframeRequested.connect(self._add_parameter_key)
+        self.rack.classicRequested.connect(self._open_in_classic)
+        self.rack.setMinimumHeight(260)
+        self.main_split.addWidget(self.rack)
+        self.main_split.setStretchFactor(0, 5)
+        self.main_split.setStretchFactor(1, 4)
+        self.rack.hide()
 
         self.setCentralWidget(root)
         self._wire_transport()
@@ -310,6 +344,46 @@ class MainWindow(QMainWindow):
         self.keyframes.setVisible(visible)
         if visible:
             self.left_splitter.setSizes(self._timeline_sizes)
+
+    # ---------------------------------------------------------- modular mode
+    def _set_modular(self, on):
+        self.classic_btn.setChecked(not on)
+        self.modular_btn.setChecked(on)
+        self.right_stack.setCurrentIndex(1 if on else 0)
+        self.rack.setVisible(on)
+        if on:
+            total = sum(self.main_split.sizes()) or self.height()
+            self.main_split.setSizes([total // 2, total - total // 2])
+            self._refresh_modular(rebuild=True)
+        else:
+            self._sync_panels(force=True)
+
+    @property
+    def modular(self):
+        return self.modular_btn.isChecked()
+
+    def _refresh_modular(self, rebuild=False):
+        """Bring the rack and library up to date. Rebuilding replaces the module widgets,
+        so it waits for the event loop: the click that asked for it may come from one."""
+        if not self.modular:
+            return
+        if rebuild:
+            QTimer.singleShot(0, self._rebuild_rack)
+        else:
+            self.rack.refresh()
+            self.library.refresh()
+
+    def _rebuild_rack(self):
+        self.rack.rebuild()
+        self.library.refresh()
+
+    def _open_in_classic(self, pid):
+        """Modulation editors live in Classic: switch there, showing that effect."""
+        effect = next((e for e in self.effects if any(p.id == pid for p in e.own_params())), None)
+        self._set_modular(False)
+        self.tabs.setCurrentIndex(0)
+        if effect is not None:
+            self.filter_search.setText(effect.label)
 
     def _focus_timeline(self):
         self.timeline_btn.setChecked(True)
@@ -342,6 +416,7 @@ class MainWindow(QMainWindow):
         self.chain_list.rebuild(self.effects)
         self.pipeline.request_reset()
         self._sync_panels(force=True)
+        self._refresh_modular(rebuild=True)
 
     def _settle_history(self):
         self.history.settle()
@@ -372,6 +447,7 @@ class MainWindow(QMainWindow):
     def _reorder_by_hand(self, ids):
         self._reorder_chain(ids)
         self.history.note_change()
+        self._refresh_modular(rebuild=True)
 
     def _filter_panels(self, *_):
         query = self.filter_search.text().strip().casefold()
@@ -679,6 +755,8 @@ class MainWindow(QMainWindow):
             target.enable.blockSignals(True)
             target.enable.setChecked(on)
             target.enable.blockSignals(False)
+        self._filter_panels()
+        self._refresh_modular(rebuild=True)
 
     def _toggle_preview(self, on):
         self.engine.set_preview(on)
@@ -825,6 +903,7 @@ class MainWindow(QMainWindow):
             self.history.note_change()
         if pid.endswith(".enabled"):
             self._filter_panels()
+            self._refresh_modular(rebuild=True)
         # Auditioning a slider is never an instruction to write automation.
         if self.transport.pb_btn.isChecked():
             self.transport.pb_btn.setChecked(False)
@@ -945,6 +1024,7 @@ class MainWindow(QMainWindow):
         if self.session.order:
             self._reorder_chain(self.session.order)
         self.chain_list.rebuild(self.effects)     # also shows retired effects the take uses
+        self._refresh_modular(rebuild=True)
         if self.session.source_path and not os.path.exists(self.session.source_path):
             replacement, _ = QFileDialog.getOpenFileName(
                 self, "Locate missing take video: " + os.path.basename(self.session.source_path),
@@ -983,6 +1063,7 @@ class MainWindow(QMainWindow):
             p.refresh()
         self.osd_panel.refresh()
         self._filter_panels()
+        self._refresh_modular()
 
     # --------------------------------------------------------------- close
     def closeEvent(self, e):
