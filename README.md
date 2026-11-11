@@ -174,8 +174,8 @@ Use the search field or **Enabled only** to find controls. Drag effects in
 | Stage | Examples |
 | --- | --- |
 | Camera | OSD, Camcorder (fisheye, auto exposure, white balance, handheld), Frame Move / Wrap, Signal, rolling shutter |
-| Digital | Downscale, FMV / CD-ROM video, Block Corruption, datamosh-style motion smear, Sync Loss, raster hold |
-| Tape / VCR | VCR Deck (keyframe Play, Pause, FF, REW, Stop and tape loading), Tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
+| Digital | Real period codecs (webcam MPEG-4, H.263 video call, MiniDV, Sorenson Spark, VCD, Cinepak, WMV, H.261) with real datamosh and bit errors, Downscale, FMV / CD-ROM video, Block Corruption, datamosh-style motion smear, Sync Loss, raster hold |
+| Tape / VCR | Accurate NTSC/VHS signal (SP/LP/EP), VCR Deck (keyframe Play, Pause, FF, REW, Stop and tape loading), tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
 | Receiver / TV | CRT raster/sync (jagged beam, wave, shake, H/V hold), composite artifacts, RF interference, ghost |
 | CRT screen | Scanlines and interlace, bloom, geometry/mask, phosphor persistence |
 | Stylize | Palette/dither, line dither, Game Boy video, LED matrix sign, Tile Scramble, pixel sorting, RGB channels / bit crush, hue shift, solarize |
@@ -187,6 +187,11 @@ Block Corruption contains the repeated-tile workflow; the separate Dirty Cartrid
 experiment was removed.
 
 ## Preview, rendering and live output
+
+**COMPARE** splits the preview: the effect on the left, the untouched source on the right.
+Drag across the picture to move the divider. **UNDO** / **REDO** (Ctrl+Z, Ctrl+Shift+Z or
+Ctrl+Y) step back through control changes; one slider drag is one step, and chain toggles and
+reorders count too. While the keyframe editor has focus, the same keys undo keyframe edits.
 
 **RENDER** offers full resolution or your current processing width/scale.
 Exports replace the destination only after completion. Cancel stops at a processing

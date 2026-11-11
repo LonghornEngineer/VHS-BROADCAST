@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["feedback"],
+  "parameters": {
+    "text.enabled": 0,
+    "feedback.enabled": 1,
+    "feedback.gain": 0.9,
+    "feedback.decay": 0.97,
+    "feedback.zoom": 0.96,
+    "feedback.angle": 3,
+    "feedback.drift": 0.08,
+    "feedback.spin": 8,
+    "feedback.shake": 0.3,
+    "feedback.keep": 0.35,
+    "feedback.loop": 5
+  }
+}

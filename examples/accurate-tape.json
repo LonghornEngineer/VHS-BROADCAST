@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["ntsc"],
+  "parameters": {
+    "text.enabled": 0,
+    "ntsc.enabled": 1,
+    "ntsc.tape": 2,
+    "ntsc.snow": 0.05
+  },
+  "timeline": {
+    "tracks": {
+      "ntsc.tape": {"t": [0, 3, 6], "v": [1, 2, 3], "interpolation": "hold"},
+      "ntsc.tracking": {"t": [0, 6, 8, 10], "v": [0, 0, 60, 0], "interpolation": "linear"}
+    }
+  }
+}
