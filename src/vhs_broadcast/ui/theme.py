@@ -21,6 +21,7 @@ QLabel#Title {{
 }}
 QLabel#Value {{ color: {C.AMBER}; font-weight: bold; }}
 QLabel#SectionHint {{ color: {C.TEXT_DIM}; letter-spacing: 2px; }}
+QLabel#StageHeader {{ color: {C.GREEN}; font-weight: bold; letter-spacing: 2px; padding: 8px 2px 2px 2px; }}
 
 QGroupBox {{
     background-color: {C.PANEL};

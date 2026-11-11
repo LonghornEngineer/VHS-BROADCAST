@@ -42,6 +42,7 @@ def to_qimage(bgr: np.ndarray) -> QImage:
 
 class PlaybackEngine(QThread):
     frameReady = Signal(QImage)
+    sourceReady = Signal(QImage)     # unprocessed frame, sent only while comparing
     positionChanged = Signal(float, int)
     finished_playing = Signal()
 
@@ -125,6 +126,9 @@ class PlaybackEngine(QThread):
             "drop_pct": (self._frames_dropped / total * 100.0) if total else 0.0,
             "decode": getattr(self._source, "decoder", "?") if self._source else "?",
         }
+
+    #: when True the unprocessed frame is also sent, for the preview's compare split
+    compare = False
 
     def set_frame_sink(self, fn):
         """Install a callable that receives each new processed BGR frame (for
@@ -405,6 +409,8 @@ class PlaybackEngine(QThread):
                 elif not audio_master:
                     self._desync = 0.0
                 if self._preview:
+                    if self.compare:
+                        self.sourceReady.emit(to_qimage(work))
                     self._emit(processed)
                 self.positionChanged.emit(t, self._out_index)
 

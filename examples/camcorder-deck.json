@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["camcorder", "deck"],
+  "parameters": {
+    "text.enabled": 0,
+    "camcorder.enabled": 1,
+    "camcorder.fisheye": 0.7,
+    "camcorder.vignette": 0.5,
+    "camcorder.exposure": 1,
+    "camcorder.wb": 1,
+    "camcorder.shake": 0.6,
+    "camcorder.sharpen": 0.5,
+    "deck.enabled": 1
+  },
+  "timeline": {
+    "tracks": {
+      "deck.mode": {"t": [0, 1, 4, 5, 7.5, 8.5, 10], "v": [4, 0, 1, 0, 2, 0, 3], "interpolation": "hold"}
+    }
+  }
+}

@@ -1,9 +1,126 @@
 # Effect reference
 
+## Signal stages
+
+Effects are grouped in signal order, the way the picture travels through real gear. A new
+chain runs stage by stage, so a stacked look ("shot on a camcorder, compressed, dubbed to
+VHS, watched on a CRT") is one take. You can still drag effects within the chain;
+**RESET TO SIGNAL ORDER** in the Signal Chain tab puts them back. Takes save the chain
+order, and agents see each effect's `stage` in `vhs-agent catalog`.
+
+| Stage | Effects |
+| --- | --- |
+| Camera | OSD / Text, Camcorder, Frame Move / Wrap, Signal, Rolling Shutter |
+| Digital | Raster / Pixel Hold, Sync Loss, Downscale, Digital Codec (real), Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
+| Tape / VCR | NTSC / VHS Signal (accurate), VCR Deck, Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
+| Receiver / TV | Edge Ring, CRT Raster / Sync, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
+| CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask |
+| Stylize | Solarize, Signal Fold, Hue Shift, Pixel Sort, Game Boy, LED Matrix, Tile Scramble, RGB Channels / Bit Crush, Palette / Dither, Luma Key, Line Dither |
+| Composite | Video Feedback, Temporal Displacement |
+
+### Real codecs: Digital Codec
+
+**DIGITAL CODEC (REAL)** runs each frame through an actual period encoder and decoder, so
+blocking, mosquito noise, smeared motion and datamosh come from real compression. The
+encoder and decoder keep their state from frame to frame, the way a file or a stream would.
+
+| Format | Codec | Picture | Rate |
+| --- | --- | --- | --- |
+| Webcam 2006 | MPEG-4 Part 2 | 320 wide | 15 fps |
+| Video call | H.263 | 352x288 (CIF) | 12 fps |
+| MiniDV | DV, 4:1:1 colour | 720x480 | 29.97 fps |
+| Early web video | Sorenson Spark (FLV) | 320 wide | 15 fps |
+| VCD | MPEG-1 | 352 wide | 29.97 fps |
+| CD-ROM | Cinepak | 320 wide | 15 fps |
+| Windows Media | WMV 8 | 320 wide | 15 fps |
+| Videophone 1990 | H.261 | 176x144 (QCIF) | 10 fps |
+| QuickTime | Sorenson Video | 320 wide | 15 fps |
+
+- **Quality** sets the quantizer and bitrate: 0 is far worse than the period, 0.5 typical,
+  1 near-clean. DV and Cinepak have fixed quality.
+- **Size** scales the coded width (formats with a fixed picture size ignore it);
+  **Frame rate** overrides the format's rate (0 keeps it); **Keyframe every** sets the
+  keyframe interval in frames (0 keeps the format's).
+- **Datamosh** drops every keyframe after the first, so later frames paint their motion onto
+  an old picture: real datamosh, not a drawn smear. Encoders often code a cut as a P-frame
+  of fresh blocks, so while Datamosh is on the effect detects hard cuts and forces a keyframe
+  there to throw away; the new shot then leaks in block by block.
+- **Packet loss** drops whole frames' packets; **Bit errors** corrupts bytes inside packets,
+  giving true decoder error concealment. Both follow **Seed**, so renders repeat.
+- **Scaling** Smooth or Chunky when the small picture is enlarged back.
+- Encoding restarts after a backward seek or a jump, so render from the start of a section
+  to match playback. Costs 3-10 ms per frame, except Cinepak (about 55 ms; its encoder is slow).
+  MPEG-1 shows its picture one frame late, as its decoder needs the next frame to finish one.
+
+Try `examples/codec-mosh.json`.
+
+### Accurate tape: NTSC / VHS Signal
+
+**NTSC / VHS SIGNAL (ACCURATE)** models the signal a VCR records instead of drawing artifacts.
+The picture is converted to YIQ, its colour band-limited and modulated onto the 3.58 MHz
+subcarrier (one pixel per sample at four times the subcarrier for 480-line video). The
+composite signal is then damaged (signal noise, snow, head switching, tracking error),
+decoded back to luma and colour (notch, box or line-comb decoder), and run through the
+tape: edge wave, the luma and chroma bandwidth of **SP, LP or EP**, chroma lag and colour
+dropouts. Rainbow cross-colour on fine detail, colour trailing right of edges, ringing and
+smeared chroma all come from that one signal path, so they interact as on real tape.
+
+- **Fields:** Interlaced (each field processed separately), One field (line-doubled, the
+  softer VHS playback look) or Progressive.
+- **Tape speed** Off gives clean broadcast composite; **Pre-emphasis**, **Luma smear**,
+  **Ringing** and **Tape sharpen** shape detail; **Signal noise**, **Snow**, **Luma/Chroma
+  noise**, **Hue error/noise**, **Chroma lag px/lines** and **Colour dropouts** add damage.
+- **Head switch lines/shift** and **Tracking lines/wave/snow** damage the bottom of the frame.
+- **Signal lines:** 480 (default) runs the signal at NTSC's 480 picture lines and scales back,
+  so 720p and 1080p cost about the same as 480p; Full frame keeps every line. Noise is seeded
+  per frame, so renders repeat. Roughly 50 ms per frame on a 4-core CPU.
+
+The stylized tape effects (Tracking, Chroma, Head Switch, Fuzz and the rest) remain for
+exaggerated looks. Use this one when the tape should look real. Its signal model was
+informed by the stages of ntsc-rs (see THIRD_PARTY_NOTICES.md); the implementation is ours.
+
+### Camcorder and VCR deck
+
+- **CAMCORDER** (Camera stage) is everything a 90s camcorder did before the tape:
+  **Fisheye** (a VX1000-style adapter: the centre bulges while the corners stay pinned),
+  **Vignette**, **Auto exposure** (a damped iris that overshoots and pumps when the scene's
+  brightness changes; **AE speed Hz**), **White balance** (starts at the daylight preset and
+  slowly corrects toward neutral, so casts linger after cuts, plus a slow warm/cool drift),
+  **Handheld** shake with **Handheld speed**, **Edge enhance** halos and **Black level**.
+- **VCR DECK** (Tape stage) works like pressing the machine's buttons: keyframe **Mode** to
+  Play, Pause (the held frame shudders with a noise bar; **Pause jitter**), Fast forward or
+  Rewind (noise bars run down or up; **Search bars**, **Bar speed**, **Bar noise**) and Stop
+  (the blue screen). Play after Stop runs the tape-loading settle: snow, then the picture
+  rolls into vertical hold over **Settle s**. After a search the bars fade out; out of Pause
+  the tape simply resumes. Transitions are timed from the mode's keyframes, so scrubbing,
+  preview and render agree. The footage itself plays at normal speed.
+
+Try `examples/camcorder-deck.json`.
+
+### Merged effects
+
+Four effects duplicated controls elsewhere and now live inside another effect. The new
+controls reproduce them (Bit Crush within one level of 255; Wobble except at the frame edge).
+Old takes that use the retired effects still load and render exactly as before: the
+effect's panel then appears, marked OLD, and is otherwise hidden.
+
+| Retired effect | Now |
+| --- | --- |
+| Wobble | CRT Raster / Sync: **Wave**, **Wave freq**, **Wave speed** |
+| TV Static | Fuzz: **Snow**, **Snow coarse**, **Snow colour** |
+| Interlace | Scanlines: **Interlace dim**, **Comb** |
+| Bit Crush | RGB Channels / Bit Crush: **Bit depth** (caps every channel) |
+| CRT Bloom's Shake px, Line jitter px, Jumps /s | CRT Raster / Sync: same names |
+
+**Downscale** (formerly Downsample) adds **Size** (By amount, 256 wide SNES, 320 wide VGA,
+or a custom **Width px**) and **Scaling** (Chunky or Smooth).
+
+## Effects
+
 
 | Effect | Controls and behavior |
 | --- | --- |
-| Video Feedback | Previous output from this effect feeds the next frame; gain, decay, zoom, rotation, X/Y offset, mix/add/screen. |
+| Video Feedback | A camera filming its own monitor: previous output feeds the next frame; gain, decay, zoom, rotation, X/Y offset, mix/add/screen. **Center X/Y** moves the vanishing point, **Drift** makes it wander, **Spin** swings the rotation out and back, **Shake** adds handheld jitter. **Keep subject** luma-keys the bright (or dark, **Subject is**) subject so it stays solid instead of smearing into the tunnel. **Loop s** makes every move repeat exactly over that length and pre-builds the trail, so with a looping source the output loops seamlessly (for GIFs and ambient loops). Try `examples/feedback-loop.json`. |
 | Datamosh / Motion Smear | Choose the original optical flow or explicit block matching against the preceding frame; block size, search radius, motion strength, persistence, held vectors and corrupted vectors. This is a frame-processing simulation, not destructive codec editing. |
 | Composite Artifacts | Edge dot crawl, false color, horizontal chroma bandwidth, continuous phase drift. |
 | Palette / Dither | Grayscale, green/amber CRT, CGA, EGA, Handheld, Sepia, Ice and Purple ramps, plus the multi-hue Riso Pop, Field, Dusk and Night City palettes (16–20 colours; Colors up to 32 uses them in full, fewer keeps an even dark-to-light spread); Bayer 2x2/4x4/8x8, noise, clustered dots, horizontal/diagonal lines and Blue Noise (an even, irregular stipple with no visible grid); amount, cell size, gamma, bias and noise seed/animation. **Match: Luma** dithers brightness only and picks colours with brightness counting double, so hues stay true and the pattern reads as tone, best with the multi-hue palettes. **Block average** flattens each cell before matching for chunky pixels. **Grade** (Instant, Slide, Faded, Night) and **S-curve** recolour the matched colours afterwards, like a film stock. **Shimmer** makes each cell pulse on its own phase so the dither twinkles (Shimmer Hz sets the pace, Seed the pattern); **LED Gap** darkens the border of each cell for an LED-panel look when Cell px is 2 or more. **Crush** pushes shadows to black and **Glow** blooms bright lights into wide halos before dithering, so lamps and windows turn into stippled glows. Try `examples/purple-shimmer.json`, `examples/film-dither.json` and `examples/night-city.json`. |
@@ -35,6 +152,9 @@ keyframes. Resetting or tweaking a control does not automatically create keys.
   with a dark **Blank bar** between frames. **Beam fade** dims lines the beam
   drew a while ago, the band you see when a CRT is filmed, with **Beam speed**
   for how fast it sweeps. Try `examples/crt-raster.json`.
+  **Wave** bends the picture in a smooth sideways wave (formerly Wobble), and **Shake px**,
+  **Line jitter px** and **Jumps /s** keep a filmed CRT moving: whole-picture shake, ragged
+  scanlines and brief vertical-hold slips.
 
 ### Streaks, tears and a shaking CRT
 
@@ -58,12 +178,11 @@ original look, so older takes render unchanged (except CRT Bloom's glow, reworke
   rows sideways. **Shape: Zigzag** steps rows sideways in a sawtooth so vertical
   edges turn into zigzags; **Zig px** sets the tooth height, **Amount** the
   swing, and **Slices** how far up from the bottom it reaches.
-- **CRT BLOOM**: **Amount**, **Cutoff** and **Radius** now glow on any footage: Cutoff is relative
+- **CRT BLOOM**: **Amount**, **Cutoff** and **Radius** glow on any footage: Cutoff is relative
   to each frame's own highlights with a soft knee, the glow combines a tight core with wide
-  halos, and it is screened on so bright scenes glow instead of clipping to white. **Shake px** keeps the whole picture moving slightly,
-  **Line jitter px** shifts each scanline a little for ragged edges, and
-  **Jumps /s** adds brief vertical-hold slips. These work even with Amount at 0,
-  for shake without glow. Try `examples/analog-jitter.json`.
+  halos, and it is screened on so bright scenes glow instead of clipping to white. The shake,
+  line jitter and jumps controls that used to be here are now in CRT Raster / Sync.
+  Try `examples/analog-jitter.json`.
 
 ### Handheld and console glitches
 

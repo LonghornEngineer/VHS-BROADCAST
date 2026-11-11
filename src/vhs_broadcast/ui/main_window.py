@@ -5,8 +5,9 @@ import os
 
 from PySide6.QtCore import Qt, QTimer, Signal, QDateTime, QThread
 from PySide6.QtGui import QAction
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QDateTimeEdit,
     QMainWindow, QMenu, QMessageBox, QProgressDialog, QPushButton,
     QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolButton, QVBoxLayout, QWidget,
@@ -23,6 +24,8 @@ from ..core.outputs import VirtualCamOutput, VideoRecorder
 from ..core import capture as cap
 from ..core.motor import motor_speed, motor_affects_audio
 from ..effects.vhs import TextOverlayEffect, default_effects
+from ..effects.stages import STAGES, STAGE_LABEL, in_use, param_in_use, signal_order
+from ..core.history import ControlHistory
 from .theme import STYLESHEET
 from .widgets.effect_panel import EffectPanel
 from .widgets.transport import Transport
@@ -86,6 +89,7 @@ class MainWindow(QMainWindow):
         self.params.set_change_hook(self._on_parameter_changed)
 
         self.engine.frameReady.connect(self.video.set_image)
+        self.engine.sourceReady.connect(self.video.set_source)
         self.engine.positionChanged.connect(self._on_position)
         self.engine.finished_playing.connect(self._on_finished)
         self.engine.set_audio_clock(self._audio_clock)
@@ -187,6 +191,18 @@ class MainWindow(QMainWindow):
         tog_row.addWidget(self.drop_cb)
         tog_row.addWidget(self.preview_on_cb)
         tog_row.addStretch(1)
+        self.compare_btn = QPushButton("COMPARE")
+        self.compare_btn.setCheckable(True)
+        self.compare_btn.setToolTip("Split the preview: effect left, untouched source right. Drag on the picture to move the divider.")
+        self.compare_btn.toggled.connect(self._toggle_compare)
+        tog_row.addWidget(self.compare_btn)
+        self.undo_btn = QPushButton("UNDO")
+        self.undo_btn.setToolTip("Undo the last control change (Ctrl+Z). In the keyframe editor, undoes keyframe edits.")
+        self.undo_btn.clicked.connect(lambda: self._undo(False))
+        self.redo_btn = QPushButton("REDO")
+        self.redo_btn.setToolTip("Redo (Ctrl+Shift+Z or Ctrl+Y)")
+        self.redo_btn.clicked.connect(lambda: self._undo(True))
+        tog_row.addWidget(self.undo_btn); tog_row.addWidget(self.redo_btn)
         self.timeline_btn = QPushButton("TIMELINE")
         self.timeline_btn.setCheckable(True)
         self.timeline_btn.setChecked(True)
@@ -222,22 +238,31 @@ class MainWindow(QMainWindow):
         cv.addLayout(filter_row)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         holder = QWidget()
-        cols = QHBoxLayout(holder); cols.setSpacing(8)
-        col_a = QVBoxLayout(); col_b = QVBoxLayout()
-        for c in (col_a, col_b):
-            cols.addLayout(c)
+        stack = QVBoxLayout(holder); stack.setSpacing(6)
         self.panels: list[EffectPanel] = []
-        targets = [col_a, col_b]
-        i = 0
-        for eff in self.effects:
-            if isinstance(eff, TextOverlayEffect):
-                continue  # OSD has its own editor above
-            panel = EffectPanel(eff)
-            self.panels.append(panel)
-            targets[i % len(targets)].addWidget(panel)
-            i += 1
-        for c in (col_a, col_b):
-            c.addStretch(1)
+        self._stage_headers = {}
+        labels = {e.id: e.label for e in self.effects}
+        for key, title, blurb in STAGES:
+            members = [e for e in self.effects
+                       if e.stage == key and not isinstance(e, TextOverlayEffect)]
+            if not members:
+                continue
+            header = QLabel(f"{title}  \u2014  {blurb}")
+            header.setObjectName("StageHeader")
+            header.setWordWrap(True)
+            stack.addWidget(header)
+            grid = QGridLayout(); grid.setSpacing(8)
+            stage_panels = []
+            for i, eff in enumerate(members):
+                note = (f"{eff.label}  (OLD \u2014 now in {labels.get(eff.legacy_of, eff.legacy_of)})"
+                        if eff.legacy_of else None)
+                panel = EffectPanel(eff, header_text=note)
+                self.panels.append(panel)
+                stage_panels.append(panel)
+                grid.addWidget(panel, i // 2, i % 2, Qt.AlignTop)
+            stack.addLayout(grid)
+            self._stage_headers[key] = (header, stage_panels)
+        stack.addStretch(1)
         scroll.setWidget(holder)
         cv.addWidget(scroll, 1)
         self.tabs.addTab(controls, "CONTROLS")
@@ -250,9 +275,14 @@ class MainWindow(QMainWindow):
                       "vs TV). Preview and render follow this order.")
         hint.setWordWrap(True); hint.setObjectName("SectionHint")
         chv.addWidget(hint)
-        self.chain_list = ChainList(self.effects, self._reorder_chain,
-                                    self._toggle_chain)
+        self.chain_list = ChainList(self.effects, self._reorder_by_hand,
+                                    self._toggle_chain, hidden=self._hidden_legacy)
         chv.addWidget(self.chain_list, 1)
+        reset_order = QPushButton("RESET TO SIGNAL ORDER")
+        reset_order.setToolTip("Sort the chain camera \u2192 digital \u2192 tape \u2192 receiver \u2192 CRT \u2192 "
+                               "stylize \u2192 composite, keeping the order within each stage.")
+        reset_order.clicked.connect(self._reset_signal_order)
+        chv.addWidget(reset_order)
         self.tabs.addTab(chain_w, "SIGNAL CHAIN")
         self.keyframes = KeyframeEditor(self.params, self.timeline, self.effects,
                                         self.engine.current_time)
@@ -272,6 +302,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
         self._wire_transport()
+        self._build_history()
 
     def _show_timeline(self, visible):
         if not visible:
@@ -284,13 +315,77 @@ class MainWindow(QMainWindow):
         self.timeline_btn.setChecked(True)
         self.keyframes.control.setFocus()
 
+    # --------------------------------------------------------------- undo
+    def _build_history(self):
+        self.history = ControlHistory(self._capture_controls, self._restore_controls)
+        for keys, redo in ((QKeySequence.Undo, False), (QKeySequence.Redo, True),
+                           (QKeySequence("Ctrl+Y"), True)):
+            shortcut = QShortcut(keys, self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(lambda r=redo: self._undo(r))
+        self._settle = QTimer(self)
+        self._settle.timeout.connect(self._settle_history)
+        self._settle.start(250)
+        self._settle_history()
+
+    def _capture_controls(self):
+        return {"params": self.params.snapshot(),
+                "settings": {e.id: e.settings() for e in self.effects if hasattr(e, "settings")},
+                "order": [e.id for e in self.effects]}
+
+    def _restore_controls(self, state):
+        self.params.restore(state["params"])
+        for effect in self.effects:
+            if effect.id in state["settings"]:
+                effect.restore_settings(state["settings"][effect.id])
+        self._reorder_chain(state["order"])
+        self.chain_list.rebuild(self.effects)
+        self.pipeline.request_reset()
+        self._sync_panels(force=True)
+
+    def _settle_history(self):
+        self.history.settle()
+        self.undo_btn.setEnabled(bool(self.history.undo_stack) or self.history._open)
+        self.redo_btn.setEnabled(bool(self.history.redo_stack))
+
+    def _undo(self, redo):
+        # The keyframe editor keeps its own history; route there while it has focus.
+        focus = self.focusWidget()
+        if focus is not None and self.keyframes.isAncestorOf(focus):
+            (self.keyframes.redo if redo else self.keyframes.undo)()
+        elif not (self.history.redo() if redo else self.history.undo()):
+            self.statusBar().showMessage("Nothing to redo." if redo else "Nothing to undo.", 2000)
+        self._settle_history()
+
+    def _toggle_compare(self, on):
+        self.engine.compare = on
+        self.video.set_compare(on)
+
+    def _hidden_legacy(self, effect):
+        """Retired effects stay out of sight unless the open take uses them."""
+        return bool(effect.legacy_of) and not in_use(effect, self.timeline)
+
+    def _reset_signal_order(self):
+        self._reorder_by_hand([e.id for e in signal_order(self.effects)])
+        self.chain_list.rebuild(self.effects)
+
+    def _reorder_by_hand(self, ids):
+        self._reorder_chain(ids)
+        self.history.note_change()
+
     def _filter_panels(self, *_):
         query = self.filter_search.text().strip().casefold()
         for panel in self.panels:
             effect = panel.effect
-            text = " ".join([effect.label, *[p.label for p in effect.own_params()]]).casefold()
-            panel.setVisible(query in text and
+            for row in panel.rows:
+                if row.param.legacy:
+                    row.setVisible(param_in_use(row.param, self.timeline))
+            text = " ".join([effect.label, STAGE_LABEL[effect.stage],
+                             *[p.label for p in effect.own_params()]]).casefold()
+            panel.setVisible(query in text and not self._hidden_legacy(effect) and
                              (not self.active_only.isChecked() or effect.enabled_param().value >= .5))
+        for header, members in self._stage_headers.values():
+            header.setVisible(any(not p.isHidden() for p in members))
 
     def _build_osd(self) -> QGroupBox:
         box = QGroupBox("OSD / TEXT")
@@ -577,6 +672,7 @@ class MainWindow(QMainWindow):
         if e is None:
             return
         e.enabled_param().set_base(1.0 if on else 0.0, notify=False)
+        self.history.note_change()
         # keep the matching control panel checkbox in sync (OSD has no panel)
         target = next((p for p in self.panels if p.effect.id == eid), None)
         if target is not None:
@@ -725,6 +821,8 @@ class MainWindow(QMainWindow):
                 self.audio_player.pause()
 
     def _on_parameter_changed(self, pid, value):
+        if hasattr(self, "history"):
+            self.history.note_change()
         if pid.endswith(".enabled"):
             self._filter_panels()
         # Auditioning a slider is never an instruction to write automation.
@@ -826,6 +924,7 @@ class MainWindow(QMainWindow):
             return
         self.pipeline.request_reset()
         self.keyframes.refresh(clear_history=True)
+        self.history.reset()
         for widget, value in ((self.text_edit, self.text_effect.custom_text),
                               (self.corner_edit, self.text_effect.corner_text)):
             widget.setText(value)
@@ -845,7 +944,7 @@ class MainWindow(QMainWindow):
             self.font_cb.setCurrentText(font_name)
         if self.session.order:
             self._reorder_chain(self.session.order)
-            self.chain_list.rebuild(self.effects)
+        self.chain_list.rebuild(self.effects)     # also shows retired effects the take uses
         if self.session.source_path and not os.path.exists(self.session.source_path):
             replacement, _ = QFileDialog.getOpenFileName(
                 self, "Locate missing take video: " + os.path.basename(self.session.source_path),
