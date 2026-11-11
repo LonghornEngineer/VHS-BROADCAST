@@ -99,6 +99,24 @@ class EffectTests(unittest.TestCase):
         self.assertEqual(full.apply(frame, 0).shape, frame.shape)
         self.assertFalse(np.array_equal(out, full.apply(frame, 0)))
 
+    def test_full_snow_is_a_lost_station(self):
+        import cv2
+        img = bars(120, 168)
+        sat = lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2HSV)[..., 1].mean()
+        _, weak = make(**dict(QUIET, tape=0, snow=.2))
+        self.assertGreater(sat(weak.apply(img, 1.0)), 60)               # colour holds
+        _, gone = make(**dict(QUIET, tape=0, snow=1))
+        a = gone.apply(img, 1.0)
+        self.assertLess(sat(a), 25)                                     # colour killer
+        self.assertGreater(a.std(axis=(0, 1)).mean(), 35)               # all snow
+
+    def test_physical_tracking_noise_grows_toward_the_bottom(self):
+        img = np.full((240, 200, 3), 128, np.uint8)
+        _, effect = make(**dict(QUIET, tape=1, tracking=120, tracking_snow=.6, fields=2))
+        dev = np.abs(effect.apply(img, 1.0).astype(int) - 128).mean(axis=(1, 2))
+        self.assertLess(dev[:100].mean(), 4)                            # above the band: clean
+        self.assertGreater(dev[-20:].mean(), dev[130:160].mean() + 10)  # head off the track
+
     def test_registered_in_tape_stage(self):
         from vhs_broadcast.effects.vhs import default_effects
         effect = next(e for e in default_effects(ParameterSet()) if e.id == "ntsc")

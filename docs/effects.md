@@ -71,6 +71,14 @@ smeared chroma all come from that one signal path, so they interact as on real t
   **Ringing** and **Tape sharpen** shape detail; **Signal noise**, **Snow**, **Luma/Chroma
   noise**, **Hue error/noise**, **Chroma lag px/lines** and **Colour dropouts** add damage.
 - **Head switch lines/shift** and **Tracking lines/wave/snow** damage the bottom of the frame.
+- Its noise runs through the same models as the other tape effects (*Analog static*). **Snow** is RF noise through the TV's envelope
+  detector, so a weak station turns grey and snowy and the colour killer drops the colour
+  past about half strength; with Tape speed Off, **Signal noise** is weak reception too. On
+  tape, **Signal noise** lowers the tape's carrier-to-noise ratio (FM grain and, when worn
+  enough, clicks, plus streaky colour-under noise), **Tracking lines** walk the head off its
+  track toward the bottom (**Tracking snow** sets how far), and the head switch dips the RF.
+  The clicks pass through the tape's own luma filters, so SP, LP and EP soften them
+  differently.
 - **Signal lines:** 480 (default) runs the signal at NTSC's 480 picture lines and scales back,
   so 720p and 1080p cost about the same as 480p; Full frame keeps every line. Noise is seeded
   per frame, so renders repeat. Roughly 50 ms per frame on a 4-core CPU.
