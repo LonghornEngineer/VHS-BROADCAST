@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["codec"],
+  "parameters": {
+    "text.enabled": 0,
+    "codec.enabled": 1,
+    "codec.format": 0,
+    "codec.quality": 0.25,
+    "codec.keyframe": 45
+  },
+  "timeline": {
+    "tracks": {
+      "codec.datamosh": {"t": [0, 3.5, 7], "v": [0, 1, 0], "interpolation": "hold"},
+      "codec.errors": {"t": [0, 7, 9, 10], "v": [0, 0, 0.6, 0], "interpolation": "linear"}
+    }
+  }
+}
