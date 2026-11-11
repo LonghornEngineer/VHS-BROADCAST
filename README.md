@@ -173,10 +173,10 @@ Use the search field or **Enabled only** to find controls. Drag effects in
 
 | Stage | Examples |
 | --- | --- |
-| Camera | OSD, Camcorder (fisheye, auto exposure, white balance, handheld), Frame Move / Wrap, Signal, rolling shutter |
+| Camera | OSD, Light flicker (fluorescent, failing tube, candle, strobe), Camcorder (fisheye, auto exposure, white balance, handheld), Aspect (4:3, 16:9, scope, pan and scan), Frame Move / Wrap, Signal, rolling shutter |
 | Digital | Real period codecs (webcam MPEG-4, H.263 video call, MiniDV, Sorenson Spark, VCD, Cinepak, WMV, H.261) with real datamosh and bit errors, Downscale, FMV / CD-ROM video, Block Corruption, datamosh-style motion smear, Sync Loss, raster hold |
 | Tape / VCR | Accurate NTSC/VHS signal (SP/LP/EP), VCR Deck (keyframe Play, Pause, FF, REW, Stop and tape loading), tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
-| Receiver / TV | CRT raster/sync (jagged beam, wave, shake, H/V hold), composite artifacts, RF interference, ghost |
+| Receiver / TV | CRT raster/sync (jagged beam, wave, shake, H/V hold), TV circuit bend (yoke feedback, collapse, foldover, convergence, purity, retrace, overdrive, dead guns), composite artifacts, RF interference, ghost |
 | CRT screen | Scanlines and interlace, bloom, geometry/mask, phosphor persistence |
 | Stylize | Palette/dither, line dither, Game Boy video, LED matrix sign, Tile Scramble, pixel sorting, RGB channels / bit crush, hue shift, solarize |
 | Composite | Video feedback, temporal displacement |
@@ -314,6 +314,17 @@ its spec before creation. Take files do not embed media.
 
 See [Agent API](docs/agent-api.md) for the JSON contract, Python functions, errors,
 stdin input, modulation settings and keyframe examples. No screen clicking is required.
+
+For MCP clients such as Claude Code or Claude Desktop, the optional **vhs-mcp**
+server exposes the same workflow as typed tools, plus frame previews returned as
+images so an agent can see its result before rendering:
+
+```sh
+uv sync --extra mcp
+claude mcp add vhs-broadcast -- uv run --directory /path/to/VHS-BROADCAST --extra mcp vhs-mcp
+```
+
+See [MCP server](docs/mcp.md) for the tool list and client setup.
 
 ## Troubleshooting
 

@@ -5,6 +5,9 @@ HTTP server, credentials, agent framework or model is required. It reads and
 writes the same version-2 take format as the desktop app. It does not remote-control
 a running GUI or manage live capture. Use it for repeatable file workflows.
 
+MCP clients can use the optional [`vhs-mcp` server](mcp.md) instead: the same
+functions as typed tools, plus frame previews returned as images.
+
 ## Discover, author, validate, render
 
 ```sh
