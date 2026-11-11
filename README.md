@@ -186,6 +186,21 @@ Tile Scramble retains the historical `nes_corrupt` ID for take compatibility.
 Block Corruption contains the repeated-tile workflow; the separate Dirty Cartridge
 experiment was removed.
 
+### Modular mode
+
+The **[ classic ] / [ modular ]** switch at the top right changes how you build the chain.
+Classic shows every effect as a panel of sliders. Modular shows only the effects you use,
+as a rack of modules in signal order, left to right:
+
+- The **library** on the right lists every effect by stage; click one to patch it in or
+  out (`*` = in the rack).
+- Each **module** has its mode selectors, switches and a **dial** per control: drag up or
+  down or scroll to turn it, double-click to reset. Right-click a dial to key it at the
+  playhead or open its LFO / audio modulation (in Classic).
+- **◀ ▶** move a module along the chain; **✕** takes it out.
+
+Both modes edit the same controls, so you can switch at any time, and undo covers both.
+
 ## Preview, rendering and live output
 
 **COMPARE** splits the preview: the effect on the left, the untouched source on the right.

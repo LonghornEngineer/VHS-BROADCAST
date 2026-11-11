@@ -231,4 +231,34 @@ QSpinBox, QDoubleSpinBox, QDateTimeEdit {{ background: {C.BG}; color: {C.TEXT}; 
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button, QDateTimeEdit::up-button, QDateTimeEdit::down-button {{ background: {C.PANEL_HI}; width: 14px; border: 1px solid {C.BORDER}; }}
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow, QDateTimeEdit::up-arrow {{ image: none; width:0;height:0; border-left:3px solid transparent; border-right:3px solid transparent; border-bottom:5px solid {C.GREEN}; }}
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow, QDateTimeEdit::down-arrow {{ image: none; width:0;height:0; border-left:3px solid transparent; border-right:3px solid transparent; border-top:5px solid {C.GREEN}; }}
+
+/* ---- Modular mode (Phosphor rack) ---- */
+QPushButton#ModeBtn {{
+    background: transparent; border: 1px solid {C.BORDER}; color: {C.TEXT_DIM};
+    padding: 6px 12px; letter-spacing: 1px;
+}}
+QPushButton#ModeBtn:checked {{
+    background: {C.GREEN}; border-color: {C.GREEN}; color: {C.BG}; font-weight: bold;
+}}
+QScrollArea#Rack {{ border: 1px solid {C.BORDER}; background: {C.BG}; }}
+QScrollArea#Rack > QWidget > QWidget {{ background: {C.BG}; }}
+QFrame#Module {{
+    background: {C.PANEL}; border: 1px solid {C.GREEN_DIM}; border-radius: 0px;
+}}
+QFrame#Module:hover {{ border-color: {C.GREEN}; }}
+QLabel#ModuleTitle {{
+    color: {C.GREEN}; font-size: 14px; font-weight: bold; letter-spacing: 1px;
+}}
+QLabel#ModuleTag {{ color: {C.TEXT_DIM}; }}
+QLabel#DialName {{ color: {C.TEXT}; font-size: 11px; }}
+QLabel#DialValue {{ color: {C.AMBER}; font-size: 11px; }}
+QPushButton#ModuleBtn {{ padding: 0px; border-color: {C.BORDER}; }}
+QScrollArea#Library {{ border: 1px solid {C.BORDER}; }}
+QPushButton#LibraryItem {{
+    background: transparent; border: 1px solid transparent; padding: 3px 6px; color: {C.TEXT};
+    letter-spacing: 0px;
+}}
+QPushButton#LibraryItem:checked {{
+    background: transparent; border-color: {C.GREEN_DIM}; color: {C.GREEN}; font-weight: bold;
+}}
 """
