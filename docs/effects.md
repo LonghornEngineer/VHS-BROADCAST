@@ -12,11 +12,36 @@ order, and agents see each effect's `stage` in `vhs-agent catalog`.
 | --- | --- |
 | Camera | OSD / Text, Frame Move / Wrap, Signal, Rolling Shutter |
 | Digital | Raster / Pixel Hold, Sync Loss, Downscale, Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
-| Tape / VCR | Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
+| Tape / VCR | NTSC / VHS Signal (accurate), Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
 | Receiver / TV | Edge Ring, CRT Raster / Sync, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
 | CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask |
 | Stylize | Solarize, Signal Fold, Hue Shift, Pixel Sort, Game Boy, LED Matrix, Tile Scramble, RGB Channels / Bit Crush, Palette / Dither, Luma Key, Line Dither |
 | Composite | Video Feedback, Temporal Displacement |
+
+### Accurate tape: NTSC / VHS Signal
+
+**NTSC / VHS SIGNAL (ACCURATE)** models the signal a VCR records instead of drawing artifacts.
+The picture is converted to YIQ, its colour band-limited and modulated onto the 3.58 MHz
+subcarrier (one pixel per sample at four times the subcarrier for 480-line video). The
+composite signal is then damaged (signal noise, snow, head switching, tracking error),
+decoded back to luma and colour (notch, box or line-comb decoder), and run through the
+tape: edge wave, the luma and chroma bandwidth of **SP, LP or EP**, chroma lag and colour
+dropouts. Rainbow cross-colour on fine detail, colour trailing right of edges, ringing and
+smeared chroma all come from that one signal path, so they interact as on real tape.
+
+- **Fields:** Interlaced (each field processed separately), One field (line-doubled, the
+  softer VHS playback look) or Progressive.
+- **Tape speed** Off gives clean broadcast composite; **Pre-emphasis**, **Luma smear**,
+  **Ringing** and **Tape sharpen** shape detail; **Signal noise**, **Snow**, **Luma/Chroma
+  noise**, **Hue error/noise**, **Chroma lag px/lines** and **Colour dropouts** add damage.
+- **Head switch lines/shift** and **Tracking lines/wave/snow** damage the bottom of the frame.
+- **Signal lines:** 480 (default) runs the signal at NTSC's 480 picture lines and scales back,
+  so 720p and 1080p cost about the same as 480p; Full frame keeps every line. Noise is seeded
+  per frame, so renders repeat. Roughly 50 ms per frame on a 4-core CPU.
+
+The stylized tape effects (Tracking, Chroma, Head Switch, Fuzz and the rest) remain for
+exaggerated looks. Use this one when the tape should look real. Its signal model was
+informed by the stages of ntsc-rs (see THIRD_PARTY_NOTICES.md); the implementation is ours.
 
 ### Merged effects
 
