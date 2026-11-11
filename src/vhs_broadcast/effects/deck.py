@@ -42,10 +42,25 @@ def analog_snow(rng, h, w, colour=.25, streak=1.4, level=105, spread=62):
     return out
 
 
-def _feather(rows, soft):
-    """Vertical weight for a band: 1 inside, easing to 0 over `soft` rows at each edge."""
-    edge = np.minimum(np.arange(rows) + 1, np.arange(rows)[::-1] + 1) / max(1.0, soft)
-    return np.clip(edge, 0, 1).astype(np.float32)[:, None, None]
+def _band_weight(rng, rows, w, soft):
+    """Per-pixel snow weight for a band, 0..1. The core is solid; toward the edges the snow
+    breaks up into ragged horizontal dashes and dissolves into the picture over `soft` rows,
+    the way a head drifting off-track loses signal gradually instead of at a line."""
+    y = np.arange(rows, dtype=np.float32) + .5
+    core = np.clip(np.minimum(y, rows - y) / max(1.0, soft), 0, 1)
+    core = (core * core * (3 - 2 * core))[:, None]                      # smoothstep
+    # The edge wanders along the line and from line to line.
+    unit = max(1.0, w / 640)
+    dash = rng.normal(0, 1, (rows, w)).astype(np.float32)
+    dash = cv2.GaussianBlur(dash, (0, 0), sigmaX=8 * unit, sigmaY=.6)
+    dash /= dash.std() + 1e-6
+    # Coverage follows the core: halfway out, about half the dashes are there. Each dash
+    # also fades in over a range of core values, so nothing switches on at a hard line.
+    u = .5 * (1 + np.tanh(.85 * dash))                                  # ~uniform 0..1
+    weight = np.clip((core + u - 1) / .45, 0, 1) * np.sqrt(core)
+    return weight[..., None]
+
+
 BLUE = (170, 0, 0)                     # BGR: the classic VCR blue screen
 
 
@@ -104,18 +119,29 @@ class VCRDeckEffect(TemporalEffect):
 
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _blend_band(region, rng, strength, soft):
-        """Snow over a strip of picture: denser in the middle, soft at the edges, with
-        the picture tearing through on some lines as the heads cross tracks."""
-        rows, w = region.shape[:2]
+    def _blend_band(out, top, rows, rng, strength, slip=0):
+        """Snow over a strip of picture, in place. The band fades in and out over half its
+        height on each side with ragged edges, the picture inside it slips sideways by
+        `slip` pixels, and some lines still tear through as the heads cross tracks."""
+        h, w = out.shape[:2]
+        margin = max(2, int(rows * .8))
+        lo, hi = max(0, top - margin), min(h, top + rows + margin)
+        if hi <= lo:
+            return
+        n = (top + rows + margin) - (top - margin)
+        full = _band_weight(rng, n, w, margin + rows / 3)
+        weight = full[lo - (top - margin):hi - (top - margin)]
+        region = out[lo:hi].astype(np.float32)
+        if slip:
+            # The slip follows the same soft profile, so the picture shears instead of cutting.
+            shifted = np.roll(region, slip, axis=1)
+            shear = weight.mean(axis=1, keepdims=True)
+            region = region * (1 - shear) + shifted * shear
         # Bar noise is mostly grey with white dashes: lighter, longer streaks than full snow.
-        snow = analog_snow(rng, rows, w, colour=.15, streak=3.0, level=135, spread=45)
-        weight = _feather(rows, soft) * strength
-        # Some lines still carry picture: the head is half on a track.
-        keep = (rng.random((rows, 1, 1)) < .35).astype(np.float32)
-        weight = weight * (1 - .6 * keep)
-        out = region.astype(np.float32) * (1 - weight) + snow * weight
-        return _u8(out)
+        snow = analog_snow(rng, hi - lo, w, colour=.15, streak=3.0, level=135, spread=45)
+        keep = (rng.random((hi - lo, 1, 1)) < .35).astype(np.float32)
+        weight = weight * strength * (1 - .6 * keep)
+        out[lo:hi] = _u8(region * (1 - weight) + snow * weight)
 
     def _pause(self, held, t, v, rng):
         h, w = held.shape[:2]
@@ -129,8 +155,7 @@ class VCRDeckEffect(TemporalEffect):
         if v["noise"] > 0:
             rows = max(4, h // 14)
             top = int(h * (.72 + .02 * math.sin(t * 3)))
-            region = out[top:top + rows]
-            out[top:top + rows] = self._blend_band(region, rng, v["noise"], rows / 3)
+            self._blend_band(out, top, rows, rng, v["noise"])
         return out
 
     def _search(self, frame, t, v, rng, forward):
@@ -141,13 +166,9 @@ class VCRDeckEffect(TemporalEffect):
         direction = 1 if forward else -1
         for k in range(n):
             pos = (k / n + direction * t * .35 * v["bar_speed"]) % 1
-            top = int(pos * (h + rows)) - rows
-            lo, hi = max(0, top), min(h, top + rows)
-            if hi <= lo:
-                continue
+            top = int(pos * (h + 2.6 * rows) - 1.8 * rows)   # enters and leaves fully off-screen
             # The picture inside a bar slips sideways as the head crosses tracks.
-            slip = np.roll(frame[lo:hi], int(rng.integers(-w // 12, w // 12)), axis=1)
-            out[lo:hi] = self._blend_band(slip, rng, v["noise"], rows / 4)
+            self._blend_band(out, top, rows, rng, v["noise"], int(rng.integers(-w // 12, w // 12)))
         return out
 
     def _settle(self, frame, p, came_from, v, rng):
@@ -168,5 +189,5 @@ class VCRDeckEffect(TemporalEffect):
         if v["noise"] > 0 and q < .8:
             rows = min(max(3, int(h / 10 * (1 - q))), h - int(h * .8))
             top = int(h * .8)
-            out[top:top + rows] = self._blend_band(out[top:top + rows], rng, v["noise"] * (1 - q), rows / 3)
+            self._blend_band(out, top, rows, rng, v["noise"] * (1 - q))
         return out
