@@ -230,6 +230,27 @@ class ParameterSet:
         self._motion.clear()
         self._motion_timeline = timeline
 
+    def changed_at(self, pid: str, t: float):
+        """When the keyed value of `pid` last changed at or before t (seconds), else None.
+
+        Effects use it to time transitions from their own keys, so a scrubbed preview
+        and a render from the start agree.
+        """
+        track = (self._motion_timeline.tracks.get(pid)
+                 if self._motion_timeline is not None else None)
+        if track is None or not track.times:
+            return None
+        current = track.value_at(t)
+        changed = None
+        previous = None
+        for time, value in zip(track.times, track.values):
+            if time > t:
+                break
+            if previous is not None and value != previous:
+                changed = time
+            previous = value
+        return changed if current == previous else None
+
     def resume_live_motion(self):
         """Leave timeline preview without discarding already accumulated travel."""
         self._motion_timeline = None

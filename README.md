@@ -173,9 +173,9 @@ Use the search field or **Enabled only** to find controls. Drag effects in
 
 | Stage | Examples |
 | --- | --- |
-| Camera | OSD, Frame Move / Wrap, Signal, rolling shutter |
+| Camera | OSD, Camcorder (fisheye, auto exposure, white balance, handheld), Frame Move / Wrap, Signal, rolling shutter |
 | Digital | Real period codecs (webcam MPEG-4, H.263 video call, MiniDV, Sorenson Spark, VCD, Cinepak, WMV, H.261) with real datamosh and bit errors, Downscale, FMV / CD-ROM video, Block Corruption, datamosh-style motion smear, Sync Loss, raster hold |
-| Tape / VCR | Accurate NTSC/VHS signal (SP/LP/EP), tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
+| Tape / VCR | Accurate NTSC/VHS signal (SP/LP/EP), VCR Deck (keyframe Play, Pause, FF, REW, Stop and tape loading), tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
 | Receiver / TV | CRT raster/sync (jagged beam, wave, shake, H/V hold), composite artifacts, RF interference, ghost |
 | CRT screen | Scanlines and interlace, bloom, geometry/mask, phosphor persistence |
 | Stylize | Palette/dither, line dither, Game Boy video, LED matrix sign, Tile Scramble, pixel sorting, RGB channels / bit crush, hue shift, solarize |

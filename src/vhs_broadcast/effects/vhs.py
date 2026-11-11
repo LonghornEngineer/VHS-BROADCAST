@@ -1195,10 +1195,13 @@ def default_effects(params: ParameterSet) -> list[Effect]:
     from .glitch import CRTRasterEffect, RasterHoldEffect, RollingShutterEffect, SyncLossEffect
     from .retro import GameBoyEffect, LEDMatrixEffect, NESCorruptionEffect, RGBTortureEffect
     from .stages import signal_order
+    from .camera import CamcorderEffect
+    from .deck import VCRDeckEffect
     from .codec import CodecEffect
     from .ntsc import NTSCSignalEffect
     return signal_order([
         TextOverlayEffect(params),
+        CamcorderEffect(params),
         FrameMoveEffect(params),
         SignalEffect(params),
         EdgeRingEffect(params),
@@ -1217,6 +1220,7 @@ def default_effects(params: ParameterSet) -> list[Effect]:
         SyncLossEffect(params),
         SlewEffect(params),
         WobbleEffect(params),
+        VCRDeckEffect(params),
         TrackingEffect(params),
         ChromaEffect(params),
         GhostEffect(params),
