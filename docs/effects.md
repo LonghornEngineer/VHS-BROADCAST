@@ -10,10 +10,10 @@ order, and agents see each effect's `stage` in `vhs-agent catalog`.
 
 | Stage | Effects |
 | --- | --- |
-| Camera | OSD / Text, Camcorder, Frame Move / Wrap, Signal, Rolling Shutter |
+| Camera | OSD / Text, Light Flicker, Camcorder, Aspect, Frame Move / Wrap, Signal, Rolling Shutter |
 | Digital | Raster / Pixel Hold, Sync Loss, Downscale, Digital Codec (real), Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
 | Tape / VCR | NTSC / VHS Signal (accurate), VCR Deck, Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
-| Receiver / TV | Edge Ring, CRT Raster / Sync, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
+| Receiver / TV | Edge Ring, CRT Raster / Sync, TV Circuit Bend, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
 | CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask |
 | Stylize | Solarize, Signal Fold, Hue Shift, Pixel Sort, Game Boy, LED Matrix, Tile Scramble, RGB Channels / Bit Crush, Palette / Dither, Luma Key, Line Dither |
 | Composite | Video Feedback, Temporal Displacement |
@@ -109,6 +109,42 @@ informed by the stages of ntsc-rs (see THIRD_PARTY_NOTICES.md); the implementati
   preview and render agree. The footage itself plays at normal speed.
 
 Try `examples/camcorder-deck.json`.
+
+### Lights, framing and a TV with its circuits bent
+
+- **LIGHT FLICKER** (Camera) is the scene's lighting as the camera's shutter catches it.
+  Mains lamps pulse at twice the line frequency (**Mains** 60 or 50 Hz); each row integrates
+  the light over the shutter (**Shutter 1/s**) from when the sensor reads it. **CMOS readout**
+  1 rolls down the frame, so a fast shutter under fluorescents draws bands that crawl;
+  0 is a CCD, where the whole frame pumps instead. A shutter that spans whole mains cycles
+  (1/60 at 60 Hz) hides it, as on a real camera. **Light:** Fluorescent (blue flickers most,
+  as its phosphor decays fastest), Incandescent (a shallow warm ripple), Failing tube (out,
+  fluttering as the starter retries, or lit; **Rate Hz** sets how often it changes), Candle /
+  fire (wandering, dimming toward orange) and Strobe (flashes at **Rate Hz**).
+- **ASPECT** (Camera) frames the picture as 4:3, 16:9, 2.39:1, 1:1 or 9:16. **Fit:** Crop to
+  fill (with **Pan** for pan and scan), Whole picture (bars inside the frame too) or Stretch.
+  **Amount** slides from the full frame to the target, so keying it animates the bars in.
+  **Bars:** black, a dark blur of the picture, or grey. The bars are in the picture from
+  the camera on, so tape and TV effects damage them like a real broadcast.
+- **TV CIRCUIT BEND** (Receiver) is a CRT set with its circuits failing or jumpered:
+  **Video into H / V yoke** (the picture leaks into the deflection, which integrates it, so
+  lines skew and tear following their own brightness), **Breathing** (the raster grows on
+  bright scenes as the high voltage sags), **V / H collapse** (down to one bright line),
+  **V / H linearity** (one side stretched, the other squashed, folding over past about
+  0.6), **Convergence**, **Purity** (a magnetised mask's colour blotches), **Retrace**
+  (flyback lines and lifted black), **Video drive** (an overdriven amp burns out the
+  whites; dark lines that fall into the sync tear sideways) and **Guns** (a dead or shorted
+  gun). Hold and sync faults stay in CRT Raster / Sync. Everything can be keyed or driven by
+  audio, so the set can be played.
+- **CRT BLOOM** **Glow style: Pixel overlay** is the pixel-art glow: the lights are painted
+  white on an Overlay layer, one **Glow px** wider than the light, on a grid of **Pixel px**,
+  so it brightens and saturates without washing out. Amount is the layer's opacity.
+- **DOWNSCALE** **Pixel grid** makes Chunky pixels all the same size: **Pixel-perfect
+  (snap)** fits the grid to a whole number of screen pixels and crops the remainder at the
+  edges; **Pixel-perfect (bars)** scales by a whole number and adds bars. Uneven keeps the
+  old stretch, where some pixels are one screen pixel wider than others.
+
+Try `examples/circuit-bend.json`.
 
 ### Merged effects
 
