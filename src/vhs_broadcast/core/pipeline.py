@@ -453,8 +453,8 @@ def _render_to_file(
         os.close(fd)
         video_target = tmp_video
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(video_target, fourcc, fps, (w, h))
+    from .video_writer import VideoWriter
+    writer = VideoWriter(video_target, fps, (w, h))   # level-exact H.264, colour-tagged
     resources.callback(writer.release)
     if not writer.isOpened():
         raise IOError(f"cannot open writer: {video_target}")
