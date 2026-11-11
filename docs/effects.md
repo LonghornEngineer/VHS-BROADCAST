@@ -35,8 +35,9 @@ smeared chroma all come from that one signal path, so they interact as on real t
   **Ringing** and **Tape sharpen** shape detail; **Signal noise**, **Snow**, **Luma/Chroma
   noise**, **Hue error/noise**, **Chroma lag px/lines** and **Colour dropouts** add damage.
 - **Head switch lines/shift** and **Tracking lines/wave/snow** damage the bottom of the frame.
-- Bandwidths scale with frame height, so 720p and 480p look alike. Noise is seeded per
-  frame, so renders repeat. Costs roughly 30-70 ms per 640x480 frame.
+- **Signal lines:** 480 (default) runs the signal at NTSC's 480 picture lines and scales back,
+  so 720p and 1080p cost about the same as 480p; Full frame keeps every line. Noise is seeded
+  per frame, so renders repeat. Roughly 50 ms per frame on a 4-core CPU.
 
 The stylized tape effects (Tracking, Chroma, Head Switch, Fuzz and the rest) remain for
 exaggerated looks. Use this one when the tape should look real. Its signal model was

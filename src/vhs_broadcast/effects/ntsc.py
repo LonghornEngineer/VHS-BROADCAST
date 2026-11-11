@@ -203,14 +203,20 @@ class NTSCSignalEffect(Effect):
         self.param("tape_sharpen", "Tape sharpen", .25, 0, 1)
         self.param("vertical_blend", "Chroma line blend", 1, 0, 1, step=1)
         self.param("seed", "Seed", 0, 0, 9999, step=1)
+        # NTSC carries 480 picture lines; running the signal there is authentic and fast.
+        self.choice("resolution", "Signal lines", ("480 (NTSC, fast)", "Full frame"))
 
     # ------------------------------------------------------------------ #
     def process(self, frame, t, v):
         if v["amount"] <= 0:
             return frame
+        source = frame
+        h0, w0 = frame.shape[:2]
+        if int(v["resolution"]) == 0 and h0 > 480:
+            frame = cv2.resize(frame, (max(4, round(w0 * 480 / h0)), 480), interpolation=cv2.INTER_AREA)
         h, w = frame.shape[:2]
         frame_no = int(math.floor(t * 30000 / 1001 + 1e-6))   # NTSC frame rate
-        scale = h / 480                                         # 720p behaves like 480i
+        scale = h / 480                                         # bandwidths act like 480i at any size
         fields = int(v["fields"])
         yiq = cv2.transform(frame[..., ::-1].astype(np.float32) / 255, RGB_TO_YIQ)
         if fields == 2:
@@ -228,7 +234,9 @@ class NTSCSignalEffect(Effect):
                     out[parity::2] = part
         rgb = cv2.transform(out, YIQ_TO_RGB)
         bgr = np.clip(rgb[..., ::-1] * 255 + .5, 0, 255).astype(np.uint8)
-        return cv2.addWeighted(frame, 1 - v["amount"], bgr, v["amount"], 0) if v["amount"] < 1 else bgr
+        if bgr.shape[:2] != (h0, w0):
+            bgr = cv2.resize(bgr, (w0, h0), interpolation=cv2.INTER_LINEAR)
+        return cv2.addWeighted(source, 1 - v["amount"], bgr, v["amount"], 0) if v["amount"] < 1 else bgr
 
     def _rng(self, v, stage, field_no):
         return np.random.default_rng([int(v["seed"]), stage, field_no])

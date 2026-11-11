@@ -90,6 +90,15 @@ class EffectTests(unittest.TestCase):
         self.assertTrue((diff[:470] == 0).all())
         self.assertGreater(diff[472:].max(), 20)
 
+    def test_tall_frames_run_at_480_lines_unless_full_frame(self):
+        frame = np.random.default_rng(2).integers(0, 255, (720, 1280, 3), dtype=np.uint8)
+        _, fast = make(**QUIET)
+        out = fast.apply(frame, 0)
+        self.assertEqual(out.shape, frame.shape)
+        _, full = make(resolution=1, **QUIET)
+        self.assertEqual(full.apply(frame, 0).shape, frame.shape)
+        self.assertFalse(np.array_equal(out, full.apply(frame, 0)))
+
     def test_registered_in_tape_stage(self):
         from vhs_broadcast.effects.vhs import default_effects
         effect = next(e for e in default_effects(ParameterSet()) if e.id == "ntsc")
