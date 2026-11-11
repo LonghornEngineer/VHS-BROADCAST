@@ -815,6 +815,9 @@ class DownsampleEffect(Effect):
         self.choice("size", "Size", ("By amount", "256 wide (SNES)", "320 wide (VGA)", "Custom width"))
         self.param("width", "Width px", 240, 32, 1920, step=1)
         self.choice("scaling", "Scaling", ("Chunky", "Smooth"))
+        # Chunky pixels that are all the same size: snap the grid to a whole number of
+        # screen pixels (edges cropped), or scale by a whole number and add bars.
+        self.choice("grid", "Pixel grid", ("Uneven", "Pixel-perfect (snap)", "Pixel-perfect (bars)"))
 
     def process(self, frame, t, v):
         # spatial resolution only; the temporal FPS hold is applied by the engine
@@ -835,7 +838,21 @@ class DownsampleEffect(Effect):
                 return frame
             small = cv2.resize(frame, (target, max(1, round(h * target / w))),
                                interpolation=cv2.INTER_AREA)
-        up = cv2.INTER_LINEAR if int(v["scaling"]) == 1 else cv2.INTER_NEAREST
+        smooth = int(v["scaling"]) == 1
+        grid = int(v["grid"])
+        if not smooth and grid == 1:
+            k = max(1, round(w / small.shape[1]))
+            small = cv2.resize(frame, (-(-w // k), -(-h // k)), interpolation=cv2.INTER_AREA)
+            return np.repeat(np.repeat(small, k, axis=0), k, axis=1)[:h, :w]
+        if not smooth and grid == 2:
+            k = max(1, min(w // small.shape[1], h // small.shape[0]))
+            up = np.repeat(np.repeat(small, k, axis=0), k, axis=1)
+            out = np.zeros_like(frame)
+            uh, uw = min(h, up.shape[0]), min(w, up.shape[1])
+            y0, x0 = (h - uh) // 2, (w - uw) // 2
+            out[y0:y0 + uh, x0:x0 + uw] = up[:uh, :uw]
+            return out
+        up = cv2.INTER_LINEAR if smooth else cv2.INTER_NEAREST
         return cv2.resize(small, (w, h), interpolation=up)
 
 
@@ -1078,11 +1095,16 @@ class BloomEffect(Effect):
         self.param("shake", "Shake px", 0, 0, 8, legacy=True)
         self.param("line_jitter", "Line jitter px", 0, 0, 8, legacy=True)
         self.param("jumps", "Jumps /s", 0, 0, 4, legacy=True)
+        # Pixel overlay: the pixel-art trick - lights painted white one pixel wider than
+        # the light, on an Overlay layer, all on the picture's pixel grid.
+        self.choice("style", "Glow style", ("Soft (CRT)", "Pixel overlay"))
+        self.param("pixel", "Pixel px", 1, 1, 32, step=1)
+        self.param("spread", "Glow px", 1, 0, 4, step=1)
 
     def process(self, frame, t, v):
         out = frame
         if v["amount"] > 0:
-            out = self._glow(frame, v)
+            out = self._pixel_glow(frame, v) if int(v["style"]) == 1 else self._glow(frame, v)
         if v["shake"] > 0 or v["line_jitter"] > 0 or v["jumps"] > 0:
             out = self._jitter(out, t, v)
         return out
@@ -1107,6 +1129,26 @@ class BloomEffect(Effect):
         # Screen blend glows like light does instead of clipping everything to white.
         glow = 1 - np.exp(-glow)                              # saturates softly instead of clipping
         return np.clip((1 - (1 - f) * (1 - glow)) * 255, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def _pixel_glow(frame, v):
+        """White on an Overlay layer over the lights, dilated by Glow px on the pixel grid."""
+        h, w = frame.shape[:2]
+        k = max(1, int(v["pixel"]))
+        grid = cv2.resize(frame, (max(1, w // k), max(1, h // k)), interpolation=cv2.INTER_AREA) if k > 1 else frame
+        luma = grid.astype(np.float32).max(axis=2) / 255
+        top = max(.25, float(np.percentile(luma, 99.5)))
+        lit = (luma >= v["threshold"] * top).astype(np.uint8)
+        spread = int(v["spread"])
+        if spread > 0:
+            lit = cv2.dilate(lit, np.ones((3, 3), np.uint8), iterations=spread)
+        if k > 1:
+            lit = cv2.resize(lit, (w // k * k, h // k * k), interpolation=cv2.INTER_NEAREST)
+            lit = cv2.copyMakeBorder(lit, 0, h - lit.shape[0], 0, w - lit.shape[1], cv2.BORDER_REPLICATE)
+        b = frame.astype(np.float32) / 255
+        overlay = np.where(b < .5, 2 * b, 1.0)                     # Overlay with white
+        mix = (lit.astype(np.float32) * min(1.0, v["amount"] * 1.6))[..., None]
+        return np.clip((b + (overlay - b) * mix) * 255, 0, 255).astype(np.uint8)
 
     @staticmethod
     def _jitter(frame, t, v):
@@ -1215,9 +1257,14 @@ def default_effects(params: ParameterSet) -> list[Effect]:
     from .deck import VCRDeckEffect
     from .codec import CodecEffect
     from .ntsc import NTSCSignalEffect
+    from .camera import LightFlickerEffect
+    from .framing import AspectEffect
+    from .tvfaults import CircuitBendEffect
     return signal_order([
         TextOverlayEffect(params),
+        LightFlickerEffect(params),
         CamcorderEffect(params),
+        AspectEffect(params),
         FrameMoveEffect(params),
         SignalEffect(params),
         EdgeRingEffect(params),
@@ -1233,6 +1280,7 @@ def default_effects(params: ParameterSet) -> list[Effect]:
         RasterHoldEffect(params),
         RollingShutterEffect(params),
         CRTRasterEffect(params),
+        CircuitBendEffect(params),
         SyncLossEffect(params),
         SlewEffect(params),
         WobbleEffect(params),

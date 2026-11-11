@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "source": null,
+  "order": ["flicker", "aspect", "circuit_bend", "scanlines"],
+  "parameters": {
+    "text.enabled": 0,
+    "flicker.enabled": 1,
+    "flicker.light": 2,
+    "flicker.amount": 0.5,
+    "flicker.rate": 3,
+    "aspect.enabled": 1,
+    "aspect.target": 1,
+    "aspect.bars": 1,
+    "circuit_bend.enabled": 1,
+    "circuit_bend.convergence": 0.5,
+    "circuit_bend.purity": 0.35,
+    "circuit_bend.retrace": 0.3,
+    "scanlines.enabled": 1
+  },
+  "timeline": {
+    "tracks": {
+      "aspect.amount": {"t": [0, 1.5, 2.5], "v": [0, 0, 1], "interpolation": "linear"},
+      "circuit_bend.bend_h": {"t": [0, 3, 5, 6, 7], "v": [0, 0, 0.9, 0.3, 0], "interpolation": "linear"},
+      "circuit_bend.vlin": {"t": [5, 6.5, 7.5], "v": [0, 0.85, 0], "interpolation": "linear"},
+      "circuit_bend.drive": {"t": [7, 8, 8.5], "v": [0, 0.9, 0], "interpolation": "linear"},
+      "circuit_bend.vcollapse": {"t": [9, 10], "v": [0, 1], "interpolation": "linear"}
+    }
+  }
+}
