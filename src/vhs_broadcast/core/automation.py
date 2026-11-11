@@ -175,6 +175,13 @@ class Session:
             raise ValueError("This file is not a take object.")
         if data.get("version", 1) > self.VERSION:
             raise ValueError("This take was saved by a newer version of the app.")
+        # Agent specs (and the files in examples/) may give a control as a bare number;
+        # the native form is {"value": number, ...}.
+        parameters = data.get("parameters", {})
+        if not isinstance(parameters, dict):
+            raise ValueError("parameters must be an object")
+        data["parameters"] = {pid: {"value": v} if isinstance(v, (int, float)) else v
+                              for pid, v in parameters.items()}
         tracks = Timeline.from_dict(data.get("timeline", {})).tracks
         saved_params = self.params.snapshot()
         saved_settings = {e.id: e.settings() for e in self.effects if hasattr(e, "settings")}
