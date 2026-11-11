@@ -117,7 +117,8 @@ class DeckTests(unittest.TestCase):
         def bar_row(t):
             timeline.apply(t, params)
             out = e.apply(frame, t).astype(int)
-            return int(np.argmax(np.abs(out - 128).mean(axis=(1, 2))))
+            dev = np.abs(out - 128).mean(axis=(1, 2))
+            return float((dev * np.arange(len(dev))).sum() / dev.sum())   # bar centre
         self.assertGreater(bar_row(1.1), bar_row(1.0))                      # fast forward runs down
 
 
