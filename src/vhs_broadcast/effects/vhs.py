@@ -17,6 +17,7 @@ from ..core.parameters import ParameterSet
 from .base import Effect
 from .text_render import available_fonts, default_font, draw_texts
 from .advanced import ADVANCED_EFFECTS
+from .rf import fm_playback, head_contact, receiver_snow, track_envelope
 
 
 # --------------------------------------------------------------------------- #
@@ -107,13 +108,17 @@ class WobbleEffect(Effect):
 #  Tracking: scrolling distortion band + vertical roll (signed + continuous)
 # --------------------------------------------------------------------------- #
 class TrackingEffect(Effect):
+    """Mistracking modelled at the head: the band is where the head runs onto the
+    neighbouring track, which it can't read (azimuth loss). See ``rf.py``."""
     id = "tracking"
     label = "TRACKING"
     stage = "tape"
 
     def build(self, params):
-        self.param("band", "Band Size", 0.15, 0.0, 0.5)
-        self.param("jitter", "Jitter", 0.4, 0.0, 1.0)
+        self.param("error", "Error", 0.0, 0.0, 1.0)              # steady offset, track pitches
+        self.param("skew", "Skew", 0.8, 0.0, 2.0)                # track-angle mismatch, tracks/field
+        self.param("jitter", "Sync jitter", 0.4, 0.0, 1.0)
+        self.param("noise", "RF loss", 1.0, 0.0, 1.0)
         # A direct offset is separate from the accumulated roll speed.
         self.param("roll", "V-Offset", 0.0, -1.0, 1.0)
         # continuous roll rate: quadratic response so small values stay gentle
@@ -125,28 +130,22 @@ class TrackingEffect(Effect):
         out = frame
         # signed static roll + gentle continuous wrapping roll
         travel = self.params.motion_phase("tracking.rollspeed", t, quadratic=True) * 0.6
-        scroll = self.params.motion_phase("tracking.speed", t)
         offset = int(round((v["roll"] + travel) * h))
         if offset % h != 0:
             out = np.roll(out, offset, axis=0)
-        # distortion band that scrolls up the frame
-        band_h = int(v["band"] * h)
-        if band_h > 1 and v["jitter"] > 1e-3:
-            centre = int((1.0 - scroll % 1.0) * h)
-            y0 = max(0, centre - band_h // 2)
-            y1 = min(h, centre + band_h // 2)
-            if y1 > y0:
-                n = y1 - y0
-                prof = np.sin(np.linspace(0, math.pi, n))
-                shift = (prof * v["jitter"] * w * 0.08).astype(np.int32)
-                out = out.copy()
-                band = out[y0:y1]
-                for i in range(n):
-                    out[y0 + i] = np.roll(band[i], shift[i], axis=0)
-                edge = min(y1, y0 + max(1, n // 6))
-                out[y0:edge] = np.clip(out[y0:edge].astype(np.float32)
-                                       + 60 * v["jitter"], 0, 255).astype(np.uint8)
-        return out
+        if v["noise"] < 1e-3:
+            return out
+        # Tape from another deck runs a hair off speed, so the tracking phase slips and
+        # the band crawls up the picture; Skew sets how far one field slants across.
+        slip = self.params.motion_phase("tracking.speed", t) * 2
+        lines = (np.arange(h, dtype=np.float32) + .5) / h
+        place = v["error"] + slip - v["skew"] * lines
+        rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
+        env = track_envelope(place) * head_contact(rng, h)
+        env = 1 - v["noise"] * (1 - env)
+        if env.min() > .97:
+            return out
+        return fm_playback(out, env, rng, sync=v["jitter"] * 2.5)
 
 
 # --------------------------------------------------------------------------- #
@@ -203,25 +202,12 @@ class StaticEffect(Effect):
 
     @staticmethod
     def snow(frame, t, alpha, coarse, tint):
-        """Blend random TV snow over the picture (shared with Fuzz's Snow controls)."""
-        v = {"alpha": alpha, "coarse": coarse, "tint": tint}
-        if v["alpha"] < 1e-3:
+        """A weak or missing station (shared with Fuzz's Snow controls): Alpha is the RF
+        noise level, Coarse narrows the video bandwidth, Colour defeats the colour killer."""
+        if alpha < 1e-3:
             return frame
-        h, w = frame.shape[:2]
         rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
-        k = 1 + int(v["coarse"] * 6)
-        sh, sw = max(1, h // k), max(1, w // k)
-        if v["tint"] > 1e-3:
-            snow = rng.integers(0, 256, (sh, sw, 3), dtype=np.uint8)
-            gray = snow.mean(axis=2, keepdims=True).astype(np.uint8)
-            snow = (gray * (1 - v["tint"]) + snow * v["tint"]).astype(np.uint8)
-        else:
-            g = rng.integers(0, 256, (sh, sw, 1), dtype=np.uint8)
-            snow = np.repeat(g, 3, axis=2)
-        if (sh, sw) != (h, w):
-            snow = cv2.resize(snow, (w, h), interpolation=cv2.INTER_NEAREST)
-        a = float(v["alpha"])
-        return cv2.addWeighted(frame, 1 - a, snow, a, 0)
+        return receiver_snow(frame, alpha, rng, bandwidth=1 - .8 * coarse, colour=tint)
 
 
 # --------------------------------------------------------------------------- #
@@ -262,18 +248,30 @@ class HeadSwitchEffect(Effect):
         self.param("shift", "Shift", 0.4, 0.0, 1.0)
 
     def process(self, frame, t, v):
+        """The drum hands over from one head to the other a few lines before vertical sync.
+        The second head's lines arrive a little early or late, the TV's horizontal AFC
+        pulls them back slowly, and the RF dips as the head lands on the track edge."""
         h, w = frame.shape[:2]
         bh = int(v["height"] * h)
         if bh < 1:
             return frame
-        out = frame.copy()
         y0 = h - bh
-        band = np.roll(out[y0:h], int(v["shift"] * w * 0.3), axis=1)
+        out = frame
+        if v["shift"] > 1e-3:
+            ys = np.arange(bh, dtype=np.float32)
+            dx = v["shift"] * w * .08 * np.exp(-ys / max(2.0, bh * .9))
+            map_x = np.arange(w, dtype=np.float32)[None, :] - dx[:, None]
+            map_y = np.repeat(np.arange(bh, dtype=np.float32)[:, None], w, axis=1)
+            out = frame.copy()
+            out[y0:] = cv2.remap(frame[y0:], map_x, map_y, cv2.INTER_LINEAR,
+                                 borderMode=cv2.BORDER_REPLICATE)
         if v["noise"] > 1e-3:
             rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
-            snow = np.repeat(rng.integers(0, 255, (bh, w, 1), np.uint8), 3, axis=2)
-            band = cv2.addWeighted(band, 1 - v["noise"], snow, v["noise"], 0)
-        out[y0:h] = band
+            lines = np.arange(h, dtype=np.float32)
+            dip = np.exp(-np.square((lines - y0) / max(1.5, h / 160)))
+            edge = np.where(lines >= y0, .7, 0)
+            env = 1 - v["noise"] * np.clip(dip + edge * (.6 + .4 * rng.random(h)), 0, 1)
+            out = fm_playback(out, env, rng, sync=0)
         return out
 
 
@@ -375,7 +373,7 @@ class NoiseEffect(Effect):
             out = np.clip(out.astype(np.float32) + noise, 0, 255).astype(np.uint8)
         if v["dropout"] > 1e-3:
             rng = np.random.default_rng((int(t * 1000) ^ 0x5bd1e995) & 0xFFFFFFFF)
-            tall = shape == 1                                # Smear dashes run wide
+            tall = shape == 1                                # Tall keeps its stylised columns
             n = int(v["dropout"] * (h if tall else w) * 0.5)
             if n > 0:
                 ys = rng.integers(0, h, n)
@@ -384,15 +382,22 @@ class NoiseEffect(Effect):
                     ln = rng.integers(2, max(3, w // 40), n)
                 else:
                     ln = rng.integers(2, max(3, int(v["length"]) * (1 if tall else 4)), n)
-                spacing = int(v["columns"])
-                if tall and spacing > 0:
-                    xs = xs // spacing * spacing             # dashes line up in columns
-                out = out.copy()
-                for y, x, L in zip(ys, xs, ln):
-                    if tall:
+                if tall:
+                    spacing = int(v["columns"])
+                    if spacing > 0:
+                        xs = xs // spacing * spacing         # dashes line up in columns
+                    out = out.copy()
+                    for y, x, L in zip(ys, xs, ln):
                         out[y:min(h, y + L), x] = 235
-                    else:
-                        out[y, x:min(w, x + L)] = 235
+                else:
+                    # Oxide dropouts: the RF vanishes for a stretch of a line and the FM
+                    # demodulator turns it into a noise streak with a fading tail.
+                    env = np.ones((h, w), np.float32)
+                    for y, x, L in zip(ys, xs, ln):
+                        env[y, x:min(w, x + L)] = 0
+                        if L > 8 and y + 1 < h:
+                            env[y + 1, x + L // 3:min(w, x + L)] = .15
+                    out = fm_playback(out, env, rng, doc=False, sync=0)
         if v["snow"] > 1e-3:
             out = StaticEffect.snow(out, t, v["snow"], v["snow_coarse"], v["snow_tint"])
         return out
@@ -416,16 +421,27 @@ class NoiseEffect(Effect):
         rows = np.flatnonzero(inside)
         if not len(rows):
             return frame
-        # Fresh static every frame inside the bands, in the Fuzz shape.
+        if shape == 1:
+            return self._tall_bands(frame, t, v, rows)
+        # Creased or stretched tape: the RF collapses over those lines. The edges come
+        # from the FM threshold, and Band glow is how bright the demodulator runs on noise.
+        # The tape lifts off the head gradually, so the RF tapers over several lines and
+        # the band edge breaks up in FM clicks rather than cutting off.
+        soft = cv2.GaussianBlur(inside.astype(np.float32)[:, None], (1, 0), sigmaX=.01,
+                                sigmaY=max(1.5, h / 70))[:, 0]
+        env = np.clip(1 - 1.3 * soft, 0, 1) * head_contact(rng, h, .2)
+        env[soft < .02] = 1
+        frame_rng = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
+        return fm_playback(frame, env, frame_rng, level=110 + 90 * v["band_glow"])
+
+    def _tall_bands(self, frame, t, v, rows):
+        """Stylised Tall bands: vertical streak texture over the swallowed rows."""
+        w = frame.shape[1]
         snow = np.random.default_rng(int(t * 1000) & 0xFFFFFFFF)
         length = max(int(v["length"]) * 3, 24)
-        if shape == 0:
-            texture = snow.normal(0, 1, (len(rows), w, 1)).astype(np.float32)
-        else:
-            texture = self._streak_grain(snow, len(rows), w, length, shape == 1)
+        texture = self._streak_grain(snow, len(rows), w, length, True)
         glow = v["band_glow"]
         static = np.clip(110 + 70 * texture + glow * 120, 0, 255)
-        # Gaps in the streaks let a ghost of the picture through.
         picture = frame[rows].astype(np.float32)
         mix = np.clip(.65 + .3 * glow + .2 * texture, 0, 1)
         out = frame.copy()
