@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import config as C
-from ..core.automation import Recorder, Session, Timeline
+from ..core.automation import Recorder, Session, Timeline, held_key_warnings
 from ..core.engine import Mode, PlaybackEngine
 from ..core.parameters import ParameterSet
 from ..core.pipeline import FileSource, Pipeline, RenderCancelled, render_to_file
@@ -1025,6 +1025,12 @@ class MainWindow(QMainWindow):
             self._reorder_chain(self.session.order)
         self.chain_list.rebuild(self.effects)     # also shows retired effects the take uses
         self._refresh_modular(rebuild=True)
+        held = held_key_warnings(self.params, self.timeline, self.effects)
+        if held:
+            more = f"  (+{len(held) - 1} more: see the log)" if len(held) > 1 else ""
+            self.statusBar().showMessage("Key check: " + held[0] + more, 15000)
+            for line in held:
+                print("key check:", line)
         if self.session.source_path and not os.path.exists(self.session.source_path):
             replacement, _ = QFileDialog.getOpenFileName(
                 self, "Locate missing take video: " + os.path.basename(self.session.source_path),

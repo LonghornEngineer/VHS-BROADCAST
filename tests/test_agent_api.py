@@ -145,3 +145,44 @@ class ExampleTakeTests(unittest.TestCase):
                 for pid, value in spec["parameters"].items():
                     if isinstance(value, (int, float)):
                         self.assertEqual(params.get(pid).value, params.get(pid).clamp(value))
+
+
+class HeldKeyWarningTests(unittest.TestCase):
+    def spec(self, retrace=None, enabled=None):
+        tracks = {}
+        if retrace:
+            tracks["circuit_bend.retrace"] = {"t": [t for t, _ in retrace], "v": [v for _, v in retrace],
+                                              "interpolation": "linear"}
+        if enabled:
+            tracks["circuit_bend.enabled"] = {"t": [t for t, _ in enabled], "v": [v for _, v in enabled],
+                                              "interpolation": "hold"}
+        return {"parameters": {"circuit_bend.enabled": 1}, "timeline": {"tracks": tracks}}
+
+    def warnings(self, spec):
+        with tempfile.TemporaryDirectory() as d:
+            result = create_take(spec, str(Path(d) / "take.json"))
+            self.assertEqual(result["warnings"], validate_take(result["path"])["warnings"][1:])
+            return result["warnings"]
+
+    def test_a_late_first_key_while_the_effect_is_on_is_reported(self):
+        found = self.warnings(self.spec(retrace=[(10, .6), (12, 0)]))
+        self.assertEqual(len(found), 1)
+        self.assertIn("circuit_bend.retrace", found[0])
+        self.assertIn("0:10.00", found[0])
+        self.assertIn("on from 0:00.00", found[0])
+
+    def test_no_warning_when_the_take_is_unambiguous(self):
+        cases = {
+            "keyed from the start": self.spec(retrace=[(0, 0), (10, .6)]),
+            "first value is the default": self.spec(retrace=[(10, 0), (12, .6)]),
+            "effect only turns on at the key": self.spec(retrace=[(10, .6)], enabled=[(0, 0), (10, 1)]),
+            "on less than a frame early": self.spec(retrace=[(10.01, .6)], enabled=[(0, 0), (10, 1)]),
+        }
+        for name, spec in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.warnings(spec), [])
+
+    def test_effect_switched_on_before_the_key_by_its_own_track(self):
+        found = self.warnings(self.spec(retrace=[(10, .6)], enabled=[(0, 0), (4, 1)]))
+        self.assertEqual(len(found), 1)
+        self.assertIn("on from 0:04.00", found[0])

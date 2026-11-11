@@ -71,6 +71,13 @@ controls require integers. Interpolation is `hold`, `linear` or `smooth`; named
 choices and toggles require `hold`. Endpoint values extend outside the keyed range.
 Creating keys is always explicit. An empty timeline is a static take.
 
+**Key check.** Before its first key, a track holds that key's value. If the control's
+effect is already on earlier, the value applies there too: a setting keyed for a later
+passage leaks into an earlier one. `create` and `validate` list each such control under
+`warnings`, e.g. `circuit_bend.retrace ... is first keyed at 2:05.00 to 0.6, but TV CIRCUIT
+BEND is on from 1:55.00`. Add a key where the effect turns on (usually the default value)
+to keep it out. The app shows the same check in its status bar when a take is opened.
+
 For LFO/audio settings, use the full parameter object, e.g.:
 
 ```json

@@ -205,3 +205,42 @@ class Session:
         self.source_path = data.get("source")
         self.timeline.tracks = tracks
         self.order = data.get("order")
+
+
+def _clock(t: float) -> str:
+    return f"{int(t // 60)}:{t % 60:05.2f}"
+
+
+def held_key_warnings(params, timeline: "Timeline", effects) -> list[str]:
+    """Controls whose first keyframe comes after their effect is already on.
+
+    Before its first key a track holds that key's value, so the value also applies
+    while the effect is on earlier: a setting keyed for a later passage leaks into an
+    earlier one. Only a first value that differs from the control's default is
+    reported; the take still plays as written.
+    """
+    warnings = []
+    by_prefix = {e.id: e for e in effects}
+    for pid, track in sorted(timeline.tracks.items(), key=lambda kv: kv[1].times[0] if kv[1].times else 0):
+        if not track.times or pid.endswith(".enabled") or pid not in params:
+            continue
+        first, value = track.times[0], track.values[0]
+        effect = by_prefix.get(pid.split(".", 1)[0])
+        if first <= 1e-3 or effect is None or value == params.get(pid).default:
+            continue
+        enabled = effect.enabled_param()
+        switch = timeline.tracks.get(enabled.id)
+        if switch is None or not switch.times:
+            on = 0.0 if enabled.value >= .5 else None
+        else:
+            # The switch is on from 0 if its own first value is on, else from its first "on" key.
+            moments = [0.0] + [t for t in switch.times if t < first]
+            on = next((t for t in moments if switch.value_at(t) >= .5), None)
+        if on is None or first - on < .05:               # a leak under a frame never shows
+            continue
+        label = params.get(pid).label
+        warnings.append(
+            f"{pid} ({effect.label} {label}) is first keyed at {_clock(first)} to {value:g}, but "
+            f"{effect.label} is on from {_clock(on)}, so {value:g} also applies there. "
+            f"Add a key at {_clock(on)} if it should be different.")
+    return warnings
