@@ -20,6 +20,14 @@ VCR OSD Mono is an optional user-installed font, excluded from source tracking a
 distribution builds. Its usage and redistribution terms are separate; the MIT
 license grants no rights to it. The optional fetch script is not run on startup.
 
+## Reference work
+
+The NTSC / VHS Signal effect is our own implementation. Its choice of processing
+stages (composite modulation, notch decoding, head switching, tracking noise, snow,
+VHS tape-speed bandwidths, edge wave, chroma loss and vertical chroma blend) was
+informed by [ntsc-rs](https://github.com/ntsc-rs/ntsc-rs) by valadaptive (engine
+licensed MIT OR ISC OR Apache-2.0). No ntsc-rs code is included.
+
 ## Dependencies
 
 Python dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.

@@ -175,7 +175,7 @@ Use the search field or **Enabled only** to find controls. Drag effects in
 | --- | --- |
 | Camera | OSD, Frame Move / Wrap, Signal, rolling shutter |
 | Digital | Downscale, FMV / CD-ROM video, Block Corruption, datamosh-style motion smear, Sync Loss, raster hold |
-| Tape / VCR | Tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
+| Tape / VCR | Accurate NTSC/VHS signal (SP/LP/EP), tracking, chroma, head switching, Fuzz (snow, streaks, smear bands), tearing, motor wow/flutter |
 | Receiver / TV | CRT raster/sync (jagged beam, wave, shake, H/V hold), composite artifacts, RF interference, ghost |
 | CRT screen | Scanlines and interlace, bloom, geometry/mask, phosphor persistence |
 | Stylize | Palette/dither, line dither, Game Boy video, LED matrix sign, Tile Scramble, pixel sorting, RGB channels / bit crush, hue shift, solarize |
