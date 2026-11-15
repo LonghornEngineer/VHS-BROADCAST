@@ -597,19 +597,93 @@ class PhosphorPersistenceEffect(TemporalEffect):
         return _u8(np.maximum(frame, charge * v["strength"])), {"charge": charge}
 
 
+def tube_beam_active(params, t) -> bool:
+    """True when CRT GEOMETRY / MASK is drawing the picture with electron beams,
+    so Scanlines and Bloom leave the lines and the glow to the tube."""
+    if "crt_geometry.model" not in params:
+        return False
+    return (params.get("crt_geometry.enabled").evaluate(t) >= .5
+            and int(params.get("crt_geometry.model").evaluate(t)) == 0)
+
+
 class CRTGeometryEffect(Effect):
+    """The CRT screen. **Beam** draws the picture the way a tube does: each scanline
+    swept by three electron beams whose spot widens with brightness, landing on a
+    phosphor mask drawn at display resolution, then glass glow and field decay (see
+    effects/crt_tube.py). **Overlay (legacy)** is the original filter: a stripe
+    pattern multiplied over the picture at its own resolution, kept so takes saved
+    before the beam model render exactly as they did."""
     id = "crt_geometry"
     label = "CRT GEOMETRY / MASK"
     stage = "screen"
 
     def build(self, params):
+        from .crt_tube import MASKS, Tube
+        model = self.choice("model", "Model", ("Beam (physical)", "Overlay (legacy)"))
+        model.legacy_default = 1          # takes saved before the beam model used the overlay
         self.param("curve", "Curvature", .12, 0, .5)
         self.param("corner", "Corners", .08, 0, .5)
-        self.choice("mask", "Mask", ("RGB Triads", "Aperture Grille"))
-        self.param("pitch", "Pitch px", 1, 1, 8, step=1)
-        self.param("strength", "Mask Amt", .3)
+        self.choice("mask", "Mask", MASKS)
+        # Beam model. Sizes are in source pixels/lines so the tube looks the same at
+        # any display scale; only how finely it is drawn changes.
+        self.param("scale", "Display x", 4, 1, 8, step=.5)
+        self.param("triad", "Triad pitch", 2.2, .4, 6, step=.05)
+        self.param("depth", "Mask depth", .85)
+        self.param("gap", "Line gap", .65)
+        self.param("fill", "Bright fill", .6)
+        self.param("converge", "Convergence", .25, 0, 2)
+        self.param("soft", "Phosphor soft", .35)
+        self.param("halation", "Halation", .3)
+        self.param("brightness", "Brightness", 1, .5, 2)
+        self.param("gamma", "Tube gamma", 2.2, 1.6, 2.8)
+        self.choice("raster", "Raster", ("Progressive", "Interlaced fields"))
+        self.param("fields", "Fields /s", 59.94, 25, 120)
+        self.param("field_decay", "Field decay", .5)
+        # Overlay (legacy) model.
+        self.param("pitch", "Overlay pitch px", 1, 1, 8, step=1)
+        self.param("strength", "Overlay mask amt", .3)
+        self._tube = Tube()
+        self.reset_state()
+
+    #: live preview caps the display height so playback stays usable; renders never do
+    PREVIEW_MAX_ROWS = 1080
+
+    def reset_state(self):
+        self._carry = None
+        self._carry_t = None
 
     def process(self, frame, t, v):
+        if int(v["model"]) == 1:
+            return self._overlay(frame, v)
+        h = frame.shape[0]
+        scale = float(v["scale"])
+        if self.preview:
+            scale = max(1.0, min(scale, self.PREVIEW_MAX_ROWS / max(1, h)))
+        field = None
+        history = None
+        if int(v["raster"]) == 1:
+            field = int(math.floor(t * float(v["fields"]) + 1e-6)) % 2
+            # Phosphor glow carries over only from the field just drawn.
+            if self._carry_t is not None and 0 < t - self._carry_t < .1:
+                history = self._carry
+        out, carry = self._tube.render(frame, v, scale=scale, field=field,
+                                       history=history, bloom=self._bloom(t))
+        self._carry, self._carry_t = (carry, t) if field is not None else (None, None)
+        return out
+
+    def _bloom(self, t):
+        """CRT BLOOM's soft glow, drawn here from the phosphor light (it defers to the tube)."""
+        p = self.params
+        if "bloom.enabled" not in p or p.get("bloom.enabled").evaluate(t) < .5:
+            return None
+        if int(p.get("bloom.style").evaluate(t)) != 0:
+            return None
+        amount = p.get("bloom.amount").evaluate(t)
+        if amount <= 0:
+            return None
+        return amount, p.get("bloom.threshold").evaluate(t), p.get("bloom.radius").evaluate(t)
+
+    def _overlay(self, frame, v):
         h, w = frame.shape[:2]
         xx, yy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
         x, y = (xx - (w - 1) / 2) / max(1, w / 2), (yy - (h - 1) / 2) / max(1, h / 2)

@@ -436,6 +436,7 @@ def render_to_file(
         cloned.params = render_params
         cloned._enabled = render_params.get(effect.enabled_param().id)
         cloned._own = [render_params.get(p.id) for p in effect.own_params()]
+        cloned.preview = False                 # exports always draw at full settings
         cloned.reset_state()
         render_effects.append(cloned)
     analysis = audio_react.current()
@@ -521,17 +522,32 @@ def _render_to_file(
         video_target = tmp_video
 
     from .video_writer import VideoWriter
-    writer = VideoWriter(video_target, fps, (w, h))   # level-exact H.264, colour-tagged
-    resources.callback(writer.release)
-    if not writer.isOpened():
-        raise IOError(f"cannot open writer: {video_target}")
+    # The writer takes its size from the first processed frame: a stage may draw the
+    # picture larger than the source (CRT GEOMETRY / MASK's beam model renders the tube
+    # at display scale). Later frames are fitted to it if a keyframe changes the size.
+    writer = None
+
+    def open_writer(size):
+        nonlocal writer
+        writer = VideoWriter(video_target, fps, size)   # level-exact H.264, colour-tagged
+        resources.callback(writer.release)
+        if not writer.isOpened():
+            raise IOError(f"cannot open writer: {video_target}")
 
     try:
         for processed in render_frames(src, params, timeline, effects, max_width=max_width,
                                        progress=progress, cancelled=cancelled):
+            pw, ph = processed.shape[1], processed.shape[0]
+            if writer is None:
+                open_writer((pw, ph))
+            elif (pw - pw % 2, ph - ph % 2) != writer.size:
+                processed = cv2.resize(processed, writer.size, interpolation=cv2.INTER_AREA)
             writer.write(processed)
+        if writer is None:
+            open_writer((w, h))                         # empty source: keep a valid file
     finally:
-        writer.release()
+        if writer is not None:
+            writer.release()
 
     # mux audio if we have it
     if cancelled and cancelled():

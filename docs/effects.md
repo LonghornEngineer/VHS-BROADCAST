@@ -177,7 +177,7 @@ or a custom **Width px**) and **Scaling** (Chunky or Smooth).
 | Temporal Displacement | Horizontal, vertical or radial slices of earlier frames; history seconds, depth and map animation. |
 | Block Corruption | Freeze/repeat/shift rectangles; block size, density, hold time, displacement and chroma-only operation. |
 | Phosphor Persistence | Highlight trails with separate R/G/B half-life seconds, threshold and strength. |
-| CRT Geometry / Mask | Curved tube geometry, rounded corners, RGB triads or aperture grille, mask pitch and strength. |
+| CRT Geometry / Mask | The CRT screen. **Beam (physical)** draws the picture the way a tube does, at a display scale above the signal (see *CRT beam model* below). **Overlay (legacy)** is the original stripe pattern multiplied over the picture at its own size; takes saved before the beam model load with it, so they render as before. Curvature, rounded corners and the mask type (RGB triads, aperture grille, slot mask) apply to both. |
 | RF / Hum Bars | Structured moving dark bands and herringbone patterns; frequency, angle, drift, width and intensity. |
 | Line Dither | Draws the subject as thin parallel lines that echo its outline: **Follow** measures each line in from the leading edge (default), trailing edge, or the whole outline (concentric rings), or Off for straight lines; only areas above Threshold get lines. **Lines from edge** limits how many lines grow in from the edge, so keyframing it builds the subject up line by line; 0 fills it. Bend pushes lines sideways with brightness on top. Spacing, line width, weight by light (brighter = thicker), smoothing, vertical/horizontal lines, colour (source, white, periwinkle, green, amber), background level and drift. Try `examples/line-dither.json`. |
 | FMV / CD-ROM Video | Early-90s full-motion video: the picture drops to **Width px**, then is coded in 4x4 blocks like a vector-quantising CD-ROM codec. Quiet blocks collapse to one colour (**Flat blocks** sets how quiet; 1 flattens every block), detailed ones keep four 2x2 patches. **Luma levels** and **Chroma levels** give the 8-bit colour, with colour one step coarser than brightness and greys kept neutral, and **Dither** adds a fixed irregular mottle. **Skip blocks** keeps the previous frame's pixels where a block barely changed, so motion leaves sticky blocks behind, and **Frame rate** holds frames (0 = source rate). Try `examples/fmv.json`. |
@@ -186,6 +186,41 @@ or a custom **Width px**) and **Scaling** (Chunky or Smooth).
 All are reorderable and disabled initially. Numeric controls retain audio/LFO
 modulation and explicit keyframe buttons. Named modes use dropdowns and hold
 keyframes. Resetting or tweaking a control does not automatically create keys.
+
+### CRT beam model
+
+**CRT GEOMETRY / MASK** on **Beam (physical)** does not overlay a pattern. It works the way
+the tube does, in linear light:
+
+1. **Beams.** Every line of the signal is swept by three electron beams, one per colour.
+   A beam is a soft spot whose height grows with its brightness, so dark lines are thin
+   with black gaps between them and bright lines swell until the gaps close. **Line gap**
+   sets how thin a dark line is; **Bright fill** how far a bright one swells. The beam
+   spreads its light, it never adds or loses any, so a flat field keeps its level.
+2. **Display scale.** The tube is drawn at **Display x** times the signal size (4 turns 480
+   lines into 1920). The signal's lines stay where they are; the extra pixels are what let
+   the phosphor mask be resolved. For a 4K upload of a 480-line picture use 4.5.
+3. **Convergence.** The red and blue guns land slightly right/down and left/up of green.
+4. **Curvature and corners** bend the raster; the mask stays flat on the glass.
+5. **Phosphor mask** at display resolution: delta **RGB triads**, **aperture grille**
+   stripes or a **slot mask**. **Triad pitch** is the distance between phosphors of the
+   same colour, in signal pixels, so it is independent of the signal's pixel grid and looks
+   the same at any Display x. Each phosphor glows only from its own gun. **Mask depth**
+   below 1 lets some light through the mask. The tube is driven harder to make up for
+   the light the mask blocks, as real sets are. Below about 3 display px per triad the mask
+   can no longer be drawn and turns into moiré; raise Display x or Triad pitch.
+6. **Phosphor soft** blurs each dot slightly; **Halation** is light scattered back out of the
+   faceplate glass, wide and faint. Phosphors saturate softly instead of clipping.
+7. **Raster: Interlaced fields** lights only one field's lines per frame (**Fields /s**, 59.94
+   for NTSC) and keeps the previous field glowing by **Field decay**, which is how 480i
+   actually looks on a tube.
+
+While the beam model is on, **SCANLINES** leaves the lines to the tube (its vignette and
+interlace controls still work) and **CRT BLOOM**'s soft glow is drawn inside the tube from the
+lit phosphors, with Bloom's own Amount, Cutoff and Radius. The pixel-overlay glow is unchanged.
+
+The live preview caps the tube at 1080 lines so playback stays usable; exports and agent
+renders always use the full Display x, and the exported video takes the tube's size.
 
 ### CRT raster and sync
 

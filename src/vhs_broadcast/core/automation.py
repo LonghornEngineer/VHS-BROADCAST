@@ -139,7 +139,9 @@ class Recorder:
 class Session:
     """Everything needed to reproduce a take: params + timeline + source info."""
 
-    VERSION = 2
+    # 3: controls added after version 2 may assume their legacy_default when an
+    #    older take does not mention them (CRT GEOMETRY / MASK's beam model).
+    VERSION = 3
 
     def __init__(self, params: ParameterSet, timeline: Timeline, effects=()) -> None:
         self.params = params
@@ -192,7 +194,12 @@ class Session:
                 param.set_base(param.default, notify=False)
                 param.mod = Modulator()
                 param.audio = AudioMod()
-            self.params.restore(data.get("parameters", {}))
+            saved = data.get("parameters", {})
+            if data.get("version", 1) < 3:
+                for param in self.params.all():
+                    if param.legacy_default is not None and param.id not in saved:
+                        param.set_base(param.legacy_default, notify=False)
+            self.params.restore(saved)
             for effect in self.effects:
                 if hasattr(effect, "restore_settings"):
                     effect.restore_settings(data.get("effect_settings", {}).get(effect.id, {}))
