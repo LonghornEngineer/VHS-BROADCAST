@@ -254,6 +254,20 @@ class ParameterSet:
             previous = value
         return changed if current == previous else None
 
+    def change_times(self, pid: str) -> list[float]:
+        """Every time the keyed value of `pid` changes (keys repeating a value are not
+        changes). Empty when the control has no keys or no timeline is applied."""
+        track = (self._motion_timeline.tracks.get(pid)
+                 if self._motion_timeline is not None else None)
+        if track is None:
+            return []
+        times, previous = [], None
+        for time, value in zip(track.times, track.values):
+            if previous is not None and value != previous:
+                times.append(time)
+            previous = value
+        return times
+
     def resume_live_motion(self):
         """Leave timeline preview without discarding already accumulated travel."""
         self._motion_timeline = None

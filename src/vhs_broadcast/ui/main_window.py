@@ -945,7 +945,9 @@ class MainWindow(QMainWindow):
         if not self.source_path:
             QMessageBox.information(self, "Render", "Load a video first."); return
         out, _ = QFileDialog.getSaveFileName(
-            self, "Render to", "render.mp4", "Video (*.mp4)")
+            self, "Render to", "render.mp4",
+            "H.264 video (*.mp4);;ProRes 422 HQ master (*.mov);;FFV1 lossless master (*.mkv);;"
+            "Animated GIF (*.gif)")
         if not out:
             return
         self.engine.pause(); self.transport.play_btn.setChecked(False)

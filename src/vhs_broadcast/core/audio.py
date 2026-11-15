@@ -83,7 +83,7 @@ def resample_wobble(samples: np.ndarray, sr: int,
 
 
 def mux_audio_into_video(video_path: str, samples: np.ndarray, sr: int,
-                         out_path: str, fps: float) -> bool:
+                         out_path: str, fps: float, codec: str = "aac") -> bool:
     """Copy an existing (silent) video file and add an AAC audio track.
 
     The video stream is *stream-copied* (remuxed) rather than re-encoded, so it
@@ -104,7 +104,7 @@ def mux_audio_into_video(video_path: str, samples: np.ndarray, sr: int,
         out = av.open(out_path, "w")
         # stream-copy the encoded video packets -- no re-encode
         vout = out.add_stream_from_template(vin)
-        aout = out.add_stream("aac", rate=sr)
+        aout = out.add_stream(codec, rate=sr)          # aac, or PCM for lossless masters
         aout.layout = "stereo"
 
         for pkt in src.demux(vin):

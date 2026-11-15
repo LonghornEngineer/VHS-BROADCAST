@@ -208,12 +208,18 @@ Drag across the picture to move the divider. **UNDO** / **REDO** (Ctrl+Z, Ctrl+S
 Ctrl+Y) step back through control changes; one slider drag is one step, and chain toggles and
 reorders count too. While the keyframe editor has focus, the same keys undo keyframe edits.
 
-**RENDER** offers full resolution or your current processing width/scale.
+**RENDER** offers full resolution or your current processing width/scale. The file type
+picks the format: **.mp4** high-quality H.264, **.mov** ProRes 422 HQ (10-bit, PCM audio),
+**.mkv** FFV1 lossless RGB (PCM audio), **.gif** an animated GIF (15 fps cap, 480 px wide
+unless full resolution). From the command line, `--interlace bff|tff` weaves each pair of
+rendered frames into one interlaced frame and flags the field order (render 59.94p to get a
+29.97i master), and `--repeat N` writes the result N times back to back.
 Exports replace the destination only after completion. Cancel stops at a processing
 boundary; audio preparation/muxing may finish first. Exporting over the source is blocked.
 
 ```sh
 uv run vhs-render --session take.json --output output.mp4 --full
+uv run vhs-render --session take.json --output master.mov --full --interlace bff
 ```
 
 The simpler `vhs-render` command displays human-readable progress and can overwrite

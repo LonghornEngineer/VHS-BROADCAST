@@ -266,19 +266,26 @@ async def preview_strip(spec_or_take: dict | str, times: list[float],
 @_tool
 async def render(take_path: str, output_path: str, source_video_path: str | None = None,
                  full: bool = True, with_audio: bool = True, overwrite: bool = False,
-                 ctx: Context | None = None) -> dict:
-    """Render a native take (from create_take) to an MP4 and return its absolute path.
+                 export_format: str | None = None, interlace: str | None = None,
+                 repeat: int = 1, ctx: Context | None = None) -> dict:
+    """Render a native take (from create_take) to a video file and return its absolute path.
 
     Runs the same offline renderer as `vhs-agent render`, from the first frame, so
     history effects are exact. Can take a while; progress is reported when supported.
 
     Args:
         take_path: Native take JSON.
-        output_path: Destination .mp4; must differ from the source.
+        output_path: Destination; must differ from the source. The extension picks the
+            format unless export_format is given: .mp4 H.264, .mov ProRes 422 HQ, .mkv
+            FFV1 lossless, .gif animated GIF (15 fps cap, 480 px unless full).
         source_video_path: Overrides the take's `source`.
         full: Full source resolution; False caps width at 720 px for a quick check.
         with_audio: Mux the source audio (wobbled to match the motor effect).
         overwrite: Replace an existing output file.
+        export_format: h264, prores, ffv1 or gif, overriding the extension.
+        interlace: bff or tff: weave each pair of frames into one interlaced frame (render
+            a 59.94p source to get a 29.97i master); the field order is flagged.
+        repeat: Write the result this many times back to back (GIF: plays that many times).
     """
     step = [-1]
 
@@ -297,7 +304,8 @@ async def render(take_path: str, output_path: str, source_video_path: str | None
             return api.render_take(take_path, output_path, source=source_video_path,
                                    width=0 if full else PREVIEW_MAX_WIDTH,
                                    with_audio=with_audio, overwrite=overwrite,
-                                   progress=progress)
+                                   progress=progress, export_format=export_format,
+                                   interlace=interlace, repeat=repeat)
     return await anyio.to_thread.run_sync(run)
 
 

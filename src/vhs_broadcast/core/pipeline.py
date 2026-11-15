@@ -1,6 +1,7 @@
 """Frame pipeline, video sources, and the deterministic offline renderer."""
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import cv2
@@ -406,6 +407,85 @@ def render_frames(src: VideoSource, params: ParameterSet, timeline: Timeline,
             progress(min(1.0, src.index / total))
 
 
+def weave_fields(first: np.ndarray, second: np.ndarray, order: str) -> np.ndarray:
+    """One interlaced frame from two moments. Rows 0, 2, 4... are the top field, rows
+    1, 3, 5... the bottom field. Bottom-field-first (NTSC DV, 480i) takes the bottom field
+    from the earlier frame; top-field-first takes the top field from it."""
+    out = second.copy()
+    start = 1 if order == "bff" else 0
+    out[start::2] = first[start::2]
+    return out
+
+
+def _repeat_file(source: str, target: str, times: int) -> None:
+    """Write `source` back to back `times` times without re-encoding (packet copy)."""
+    import av
+    with av.open(source) as probe:
+        streams = list(probe.streams)
+        ends, starts = {}, {}
+        for packet in probe.demux():
+            if packet.pts is None:
+                continue
+            index = packet.stream.index
+            end = packet.pts + (packet.duration or 0)
+            ends[index] = max(ends.get(index, end), end)
+            low = min(packet.pts, packet.dts if packet.dts is not None else packet.pts)
+            starts[index] = min(starts.get(index, low), low)
+        # Each pass is as long as its stream (an AAC priming packet starts before zero).
+        lengths = {i: ends[i] - starts[i] for i in ends}
+    with av.open(source) as src, av.open(target, "w") as out:
+        outs = {s.index: out.add_stream_from_template(s) for s in src.streams}
+        for n in range(times):
+            if n:
+                src.seek(0)
+            for packet in src.demux():
+                if packet.pts is None:
+                    continue
+                shift = n * lengths.get(packet.stream.index, 0)
+                packet.pts += shift
+                if packet.dts is not None:
+                    packet.dts += shift
+                packet.stream = outs[packet.stream.index]
+                out.mux(packet)
+
+
+def _render_gif(source_path, output_path, params, timeline, effects, *, max_width, loops,
+                progress=None, cancelled=None, max_fps=15.0, max_frames=3000):
+    """Animated GIF: frames capped at max_fps, a palette per frame with dithering, played
+    `loops` times (1 = once, as a video would)."""
+    from PIL import Image
+    src = FileSource(source_path, read_ahead=False)
+    try:
+        fps = src.fps or 30.0
+        step = max(1, int(math.ceil(fps / max_fps)))
+        frames = []
+        for index, processed in enumerate(render_frames(src, params, timeline, effects,
+                                                        progress=progress, cancelled=cancelled)):
+            if index % step:
+                continue
+            if processed.shape[1] > max_width:
+                processed = scale_to_width(processed, max_width, cv2.INTER_AREA)
+            rgb = Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB))
+            frames.append(rgb.quantize(colors=256, method=Image.Quantize.MEDIANCUT,
+                                       dither=Image.Dither.FLOYDSTEINBERG))
+            if len(frames) > max_frames:
+                raise ValueError(f"GIF export is limited to {max_frames} frames; trim the clip or export video")
+    finally:
+        src.release()
+    if not frames:
+        raise ValueError("Nothing to export")
+    # GIF 'loop' counts extra plays (0 = forever); one play means no loop block at all.
+    extra = {} if loops == 1 else {"loop": loops - 1}
+    frames[0].save(output_path, save_all=True, append_images=frames[1:], optimize=False,
+                   duration=int(round(1000 * step / fps)), disposal=1, **extra)
+
+
+def _ever_enabled(effect, timeline) -> bool:
+    enabled = effect.enabled_param()
+    track = timeline.tracks.get(enabled.id)
+    return enabled.value >= .5 or (track is not None and any(v >= .5 for v in track.values))
+
+
 def render_to_file(
     source_path: str,
     output_path: str,
@@ -417,8 +497,26 @@ def render_to_file(
     with_audio: bool = True,
     progress=None,
     cancelled=None,
+    export_format: Optional[str] = None,
+    interlace: Optional[str] = None,
+    repeat: int = 1,
 ) -> str:
-    """Render an isolated control snapshot with fresh motion history."""
+    """Render an isolated control snapshot with fresh motion history.
+
+    `export_format`: "h264", "prores", "ffv1" or "gif"; by default the output's extension
+    decides (.mp4 H.264, .mov ProRes 422 HQ, .mkv FFV1 lossless, .gif GIF).
+    `interlace`: "bff" or "tff" weaves each pair of rendered frames into one interlaced
+    frame (render at the field rate, e.g. 59.94p, to get 29.97i) and flags the field order.
+    `repeat`: write the result this many times back to back (for platforms that do not
+    loop); a GIF loops that many times instead."""
+    from pathlib import Path as _Path
+    if repeat < 1:
+        raise ValueError("repeat must be at least 1")
+    if interlace not in (None, "bff", "tff"):
+        raise ValueError("interlace must be bff or tff")
+    gif = (export_format == "gif") or (export_format is None and _Path(output_path).suffix.lower() == ".gif")
+    if gif and interlace:
+        raise ValueError("GIF export cannot be interlaced")
     from copy import copy
     from dataclasses import replace
     from contextlib import ExitStack
@@ -437,6 +535,8 @@ def render_to_file(
         cloned._enabled = render_params.get(effect.enabled_param().id)
         cloned._own = [render_params.get(p.id) for p in effect.own_params()]
         cloned.preview = False                 # exports always draw at full settings
+        if hasattr(cloned, "fork_caches"):
+            cloned.fork_caches()               # own caches, so a preview running alongside cannot race
         cloned.reset_state()
         render_effects.append(cloned)
     analysis = audio_react.current()
@@ -447,12 +547,24 @@ def render_to_file(
             raise ValueError("Choose a different file for the export; the source cannot be overwritten.")
         # Keep the destination intact on cancellation/failure, including audio muxing.
         with tempfile.TemporaryDirectory(prefix=".vhs-render-", dir=Path(output_path).resolve().parent) as folder:
-            staged = str(Path(folder) / "output.mp4")
-            with ExitStack() as resources:
-                _render_to_file(source_path, staged, render_params,
-                                Timeline.from_dict(timeline.as_dict()), render_effects,
-                                max_width=max_width, with_audio=with_audio,
-                                progress=progress, cancelled=cancelled, resources=resources)
+            suffix = Path(output_path).suffix or ".mp4"
+            staged = str(Path(folder) / ("output" + suffix))
+            if gif:
+                _render_gif(source_path, staged, render_params, Timeline.from_dict(timeline.as_dict()),
+                            render_effects, max_width=max_width or 480, loops=repeat,
+                            progress=progress, cancelled=cancelled)
+            else:
+                from .video_writer import format_for
+                with ExitStack() as resources:
+                    _render_to_file(source_path, staged, render_params,
+                                    Timeline.from_dict(timeline.as_dict()), render_effects,
+                                    max_width=max_width, with_audio=with_audio,
+                                    progress=progress, cancelled=cancelled, resources=resources,
+                                    codec=format_for(output_path, export_format), interlace=interlace)
+                if repeat > 1:
+                    looped = str(Path(folder) / ("looped" + suffix))
+                    _repeat_file(staged, looped, repeat)
+                    staged = looped
             if cancelled and cancelled():
                 raise RenderCancelled()
             os.replace(staged, output_path)
@@ -473,6 +585,8 @@ def _render_to_file(
     progress=None,
     cancelled=None,
     resources=None,
+    codec: str = "h264",
+    interlace: Optional[str] = None,
 ) -> str:
     """Deterministically re-render the take to a new video file.
 
@@ -517,7 +631,8 @@ def _render_to_file(
     video_target = output_path
     tmp_video = None
     if audio is not None:
-        fd, tmp_video = tempfile.mkstemp(suffix=".mp4", dir=os.path.dirname(output_path))
+        fd, tmp_video = tempfile.mkstemp(suffix=os.path.splitext(output_path)[1] or ".mp4",
+                                         dir=os.path.dirname(output_path))
         os.close(fd)
         video_target = tmp_video
 
@@ -529,11 +644,14 @@ def _render_to_file(
 
     def open_writer(size):
         nonlocal writer
-        writer = VideoWriter(video_target, fps, size)   # level-exact H.264, colour-tagged
+        # Level-exact, colour-tagged. Interlaced output carries two rendered frames per
+        # written frame, so it runs at half the render rate (59.94p -> 29.97i).
+        writer = VideoWriter(video_target, fps / 2 if interlace else fps, size, codec, interlace)
         resources.callback(writer.release)
         if not writer.isOpened():
             raise IOError(f"cannot open writer: {video_target}")
 
+    held = None                                         # first field of an interlaced pair
     try:
         for processed in render_frames(src, params, timeline, effects, max_width=max_width,
                                        progress=progress, cancelled=cancelled):
@@ -542,20 +660,37 @@ def _render_to_file(
                 open_writer((pw, ph))
             elif (pw - pw % 2, ph - ph % 2) != writer.size:
                 processed = cv2.resize(processed, writer.size, interpolation=cv2.INTER_AREA)
+            if interlace:
+                if held is None:
+                    held = processed
+                    continue
+                processed, held = weave_fields(held, processed, interlace), None
             writer.write(processed)
+        if interlace and held is not None and writer is not None:
+            writer.write(weave_fields(held, held, interlace))   # odd frame count: repeat the field
         if writer is None:
             open_writer((w, h))                         # empty source: keep a valid file
     finally:
         if writer is not None:
             writer.release()
 
+    # Effects that also touch the sound (LINEAR EDIT's cut clicks and bars tone) work on
+    # it after the picture, so cuts found while rendering are included.
+    if audio is not None:
+        samples, sr = audio
+        duration = len(samples) / sr
+        for effect in effects:
+            if hasattr(effect, "process_audio") and _ever_enabled(effect, timeline):
+                samples = effect.process_audio(samples, sr, duration)
+        audio = (samples, sr)
+
     # mux audio if we have it
     if cancelled and cancelled():
         raise RenderCancelled()
     if audio is not None:
         samples, sr = audio
-        ok = audio_mod.mux_audio_into_video(video_target, samples, sr,
-                                            output_path, fps)
+        ok = audio_mod.mux_audio_into_video(video_target, samples, sr, output_path, fps,
+                                            codec="pcm_s16le" if codec in ("prores", "ffv1") else "aac")
         try:
             if tmp_video and os.path.exists(tmp_video):
                 if not ok:

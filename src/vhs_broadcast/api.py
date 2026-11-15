@@ -220,8 +220,14 @@ def load_take(path: str, source: str | None = None):
 
 
 def render_take(path: str, output: str, *, source: str | None = None, width: int = 720,
-                with_audio: bool = True, overwrite: bool = False, progress=None) -> dict:
-    """Render a native take to a video file; width 0 keeps full resolution."""
+                with_audio: bool = True, overwrite: bool = False, progress=None,
+                export_format: str | None = None, interlace: str | None = None,
+                repeat: int = 1) -> dict:
+    """Render a native take to a video file; width 0 keeps full resolution.
+
+    export_format: h264, prores, ffv1 or gif (default: from the output extension).
+    interlace: bff or tff weaves frame pairs into interlaced frames at half the rate.
+    repeat: write the result this many times back to back (GIF: plays that many times)."""
     from .core.pipeline import render_to_file
     validate_take(path)
     if width != 0 and width < 16:
@@ -230,8 +236,9 @@ def render_take(path: str, output: str, *, source: str | None = None, width: int
         raise ValueError("Output exists; pass --overwrite to replace it")
     params, effects, timeline, source = _load(path, source)
     render_to_file(source, output, params, timeline, effects,
-                   max_width=width or None, with_audio=with_audio, progress=progress)
-    return {"path": str(Path(output).resolve())}
+                   max_width=width or None, with_audio=with_audio, progress=progress,
+                   export_format=export_format, interlace=interlace, repeat=repeat)
+    return {"path": str(Path(output).resolve()), "bytes": Path(output).stat().st_size}
 
 
 def main(argv=None):
@@ -250,6 +257,11 @@ def main(argv=None):
     render.add_argument("--output", required=True)
     render.add_argument("--width", type=int, default=720, help="Width cap; 0 for full resolution")
     render.add_argument("--no-audio", action="store_true")
+    render.add_argument("--format", choices=("h264", "prores", "ffv1", "gif"),
+                        help="Export format (default: from the output extension)")
+    render.add_argument("--interlace", choices=("bff", "tff"),
+                        help="Weave frame pairs into interlaced frames (render 59.94p for 29.97i)")
+    render.add_argument("--repeat", type=int, default=1, help="Write the result N times back to back")
     render.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -264,7 +276,8 @@ def main(argv=None):
             else:
                 result = render_take(args.session, args.output, source=args.input,
                                      width=args.width, with_audio=not args.no_audio,
-                                     overwrite=args.overwrite)
+                                     overwrite=args.overwrite, export_format=args.format,
+                                     interlace=args.interlace, repeat=args.repeat)
         print(json.dumps({"ok": True, "api_version": API_VERSION, "result": result}, allow_nan=False))
         return 0
     except Exception as error:
