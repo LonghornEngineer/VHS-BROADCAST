@@ -183,6 +183,9 @@ class Parameter:
     choices: tuple[str, ...] = ()
     # Retired control kept only so older takes still render; hidden in the UI and catalog.
     legacy: bool = False
+    # Value assumed when a take saved before this control existed is loaded, when that
+    # differs from the default for new takes (keeps old takes rendering as they did).
+    legacy_default: Optional[float] = None
 
     def __post_init__(self):
         if self.default is None:

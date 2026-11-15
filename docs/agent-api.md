@@ -2,7 +2,7 @@
 
 `vhs-agent` is a local CLI and importable Python module. No GUI application,
 HTTP server, credentials, agent framework or model is required. It reads and
-writes the same version-2 take format as the desktop app. It does not remote-control
+writes the same version-3 take format as the desktop app (version 1 and 2 takes still load). It does not remote-control
 a running GUI or manage live capture. Use it for repeatable file workflows.
 
 MCP clients can use the optional [`vhs-mcp` server](mcp.md) instead: the same
@@ -127,7 +127,7 @@ defaults 0.97 / 0.06) and `text.tag_x` / `text.tag_y` (tag, left-anchored; defau
 Successful commands write one JSON object to stdout:
 
 ```json
-{"ok": true, "api_version": 1, "result": {"path": "/absolute/path/take.json", "session_version": 2}}
+{"ok": true, "api_version": 1, "result": {"path": "/absolute/path/take.json", "session_version": 3}}
 ```
 
 Runtime/validation failures return exit code 1 and
@@ -138,7 +138,11 @@ validate's result contains `valid`, `warnings` and the track count.
 
 Create/render refuse existing output paths unless `--overwrite` is passed.
 Render refuses replacing its input video even with overwrite. Width is a pixel
-cap of at least 16 pixels, defaults to 720, and `--width 0` requests full resolution. Use `--no-audio`
+cap of at least 16 pixels, defaults to 720, and `--width 0` requests full resolution. The cap
+applies to processing; CRT GEOMETRY / MASK on its beam model (`crt_geometry.model` 0, the
+default for new takes) then draws the tube at `crt_geometry.scale` times that size, and the
+video is written at the tube's size. For a 480-line picture headed to a 4K upload, render with
+`--width 0` and scale 4.5. Takes saved before version 3 keep the old overlay (model 1). Use `--no-audio`
 for silent export. Rendering uses a temporary destination and commits on success.
 Interrupting the process does not return a structured completion result.
 

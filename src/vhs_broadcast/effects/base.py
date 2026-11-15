@@ -28,6 +28,9 @@ class Effect:
     #: stay registered only so older takes keep rendering identically
     legacy_of: str = ""
     requires_source = False
+    #: True on the live preview's effects; heavy stages may draw smaller there.
+    #: Renders and agent previews always use the full settings.
+    preview = False
 
     def reset_state(self):
         """Clear temporal history when loading, seeking or reordering."""

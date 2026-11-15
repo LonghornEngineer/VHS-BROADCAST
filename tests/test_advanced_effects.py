@@ -99,7 +99,12 @@ class AdvancedEffectsTests(unittest.TestCase):
                     original = frame.copy()
                     out = effect.apply(frame, i / 30)
                     self.assertEqual(out.dtype, np.uint8)
-                    self.assertEqual(out.shape, frame.shape)
+                    expected = frame.shape
+                    if kind is CRTGeometryEffect:
+                        # The beam tube draws at display scale (see test_crt_beam).
+                        scale = p.get("crt_geometry.scale").value
+                        expected = (int(round(frame.shape[0] * scale)), int(round(frame.shape[1] * scale)), 3)
+                    self.assertEqual(out.shape, expected)
                     np.testing.assert_array_equal(original, frame)
                     np.testing.assert_array_equal(effect.apply(frame, i / 30), out)
                 effect.enabled_param().set_base(0)

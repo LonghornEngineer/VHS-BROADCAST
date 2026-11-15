@@ -16,7 +16,7 @@ import numpy as np
 from ..core.parameters import ParameterSet
 from .base import Effect
 from .text_render import available_fonts, default_font, draw_texts
-from .advanced import ADVANCED_EFFECTS
+from .advanced import ADVANCED_EFFECTS, tube_beam_active
 from .rf import fm_playback, head_contact, receiver_snow, track_envelope
 
 
@@ -601,9 +601,14 @@ class ScanlinesEffect(Effect):
         if v["interlace"] > 1e-3 or v["comb"] > 1e-3:
             frame = InterlaceEffect.interlace(frame, t, v["interlace"], v["comb"])
         h, w = frame.shape[:2]
-        key = (h, w, round(v["strength"], 3), round(v["vignette"], 3))
+        # With CRT GEOMETRY / MASK on its beam model, the tube draws the real lines
+        # (spot width following brightness); a fixed dimming here would double them.
+        strength = 0.0 if tube_beam_active(self.params, t) else v["strength"]
+        if strength <= 1e-3 and v["vignette"] <= 1e-3:
+            return frame
+        key = (h, w, round(strength, 3), round(v["vignette"], 3))
         if key != self._cache_key:
-            self._mask = self._build_mask(h, w, v["strength"], v["vignette"])
+            self._mask = self._build_mask(h, w, strength, v["vignette"])
             self._cache_key = key
         return np.clip(frame.astype(np.float32) * self._mask, 0, 255).astype(np.uint8)
 
@@ -1133,7 +1138,11 @@ class BloomEffect(Effect):
     def process(self, frame, t, v):
         out = frame
         if v["amount"] > 0:
-            out = self._pixel_glow(frame, v) if int(v["style"]) == 1 else self._glow(frame, v)
+            if int(v["style"]) == 1:
+                out = self._pixel_glow(frame, v)
+            elif not tube_beam_active(self.params, t):
+                # On the beam tube the glow comes from the lit phosphors (drawn there).
+                out = self._glow(frame, v)
         if v["shake"] > 0 or v["line_jitter"] > 0 or v["jumps"] > 0:
             out = self._jitter(out, t, v)
         return out

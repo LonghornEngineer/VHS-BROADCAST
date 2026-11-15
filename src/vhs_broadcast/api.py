@@ -58,7 +58,7 @@ def _validate(data):
     allowed = {"version", "source", "order", "parameters", "effect_settings", "timeline"}
     if set(data) - allowed:
         raise ValueError(f"Unknown take fields: {sorted(set(data) - allowed)}")
-    if data.get("version", Session.VERSION) not in (1, Session.VERSION):
+    if data.get("version", Session.VERSION) not in range(1, Session.VERSION + 1):
         raise ValueError("Unsupported take version")
     if data.get("source") is not None and not isinstance(data["source"], str):
         raise ValueError("source must be a path string or null")
@@ -161,6 +161,8 @@ def create_take(spec: dict, output: str, *, overwrite: bool = False) -> dict:
     if not isinstance(spec, dict):
         raise ValueError("Spec must be an object")
     data = dict(spec)
+    # A spec without a version is written for the current model, not an old take.
+    data.setdefault("version", Session.VERSION)
     if not isinstance(data.get("parameters", {}), dict):
         raise ValueError("parameters must be an object")
     data["parameters"] = {pid: {"value": v} if isinstance(v, (int, float)) else v

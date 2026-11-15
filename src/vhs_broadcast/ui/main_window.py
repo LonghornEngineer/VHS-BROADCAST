@@ -71,6 +71,8 @@ class MainWindow(QMainWindow):
         # --- model ---
         self.params = ParameterSet()
         self.effects = default_effects(self.params)
+        for effect in self.effects:
+            effect.preview = True          # live view; exports clone with full settings
         self.text_effect = next(e for e in self.effects
                                 if isinstance(e, TextOverlayEffect))
         self.pipeline = Pipeline(self.effects)

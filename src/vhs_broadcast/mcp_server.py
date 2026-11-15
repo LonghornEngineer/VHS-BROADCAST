@@ -234,8 +234,9 @@ async def preview_frame(spec_or_take: dict | str, source_video_path: str | None 
         spec_or_take: A spec object (as for create_take) or a path to a native take.
         source_video_path: Video to process; defaults to the take's `source`.
         time_s: Output time in seconds (keyframes and LFOs are evaluated here).
-        width: Processing and output width cap in pixels, like render's width. Effects
-            run at this size, so it is never upscaled past the source width.
+        width: Processing width cap in pixels, like render's width. Effects run at this
+            size, so the source is never upscaled past its width. CRT GEOMETRY / MASK on
+            its beam model then draws the tube at Display x, so the PNG can be larger.
         history_s: Seconds of earlier frames processed first so history effects (feedback,
             smear, block corruption, phosphor, codec) look as in a full render. 1 s covers
             most; raise it (max 10) for long codec GOPs or long history settings, or use 0
