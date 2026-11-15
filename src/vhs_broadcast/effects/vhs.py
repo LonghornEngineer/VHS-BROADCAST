@@ -1293,6 +1293,7 @@ def default_effects(params: ParameterSet) -> list[Effect]:
     from .stages import signal_order
     from .camera import CamcorderEffect
     from .deck import VCRDeckEffect
+    from .linear_edit import LinearEditEffect
     from .codec import CodecEffect
     from .ntsc import NTSCSignalEffect
     from .camera import LightFlickerEffect
@@ -1323,6 +1324,7 @@ def default_effects(params: ParameterSet) -> list[Effect]:
         SlewEffect(params),
         WobbleEffect(params),
         VCRDeckEffect(params),
+        LinearEditEffect(params),
         TrackingEffect(params),
         ChromaEffect(params),
         GhostEffect(params),

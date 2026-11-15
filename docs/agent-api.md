@@ -15,7 +15,17 @@ uv run vhs-agent catalog
 uv run vhs-agent create --spec examples/block-glitch.json --output take.json
 uv run vhs-agent validate --session take.json
 uv run vhs-agent render --session take.json --input clip.mp4 --output out.mp4 --width 1280
+uv run vhs-agent render --session take.json --output master.mov --width 0 --interlace bff
 ```
+
+`render` picks the format from the output extension (.mp4 H.264, .mov ProRes 422 HQ, .mkv
+FFV1 lossless, .gif) or `--format h264|prores|ffv1|gif`. `--interlace bff|tff` weaves each pair
+of rendered frames into one interlaced frame at half the rate, with the field order flagged;
+`--repeat N` writes the result N times (a GIF plays N times). The result includes `bytes`.
+
+LINEAR EDIT takes its cut list as an effect setting:
+`"effect_settings": {"linear_edit": {"cuts": [12.4, 18.0, 31.75]}}` (seconds). To use an EDL,
+read it with `vhs_broadcast.effects.linear_edit.load_edl(path, fps)` and pass the list.
 
 `catalog` lists stable effect IDs, parameter IDs, defaults, bounds, steps, named
 choices and effect-specific settings. Use returned IDs instead of guessing from

@@ -122,6 +122,23 @@ class CRTBeamTests(unittest.TestCase):
         self.tube.preview = False
         self.assertEqual(self.tube.apply(img, 0).shape[0], 1920)
 
+    def test_gpu_path_matches_cpu(self):
+        # Runs the OpenCL (UMat) code path; on a box without an OpenCL device OpenCV runs
+        # the same UMat calls on the CPU, so the path is always exercised.
+        self.effects["bloom"].enabled_param().set_base(1)
+        img = np.random.default_rng(2).integers(0, 255, (30, 40, 3), np.uint8)
+        values = {p.id.split(".", 1)[1]: p.value for p in self.tube.own_params()}
+        for raster in (0, 1):
+            values["raster"] = raster
+            field = 0 if raster else None
+            cpu, carry_cpu = self.tube._tube.render(img, values, scale=3, field=field, bloom=(1, .5, .3))
+            gpu, carry_gpu = self.tube._tube.render(img, values, scale=3, field=field, bloom=(1, .5, .3), gpu=True)
+            self.assertEqual(cpu.shape, gpu.shape)
+            self.assertLessEqual(int(np.abs(cpu.astype(int) - gpu.astype(int)).max()), 2)
+            if raster:
+                again, _ = self.tube._tube.render(img, values, scale=3, field=1, history=carry_gpu, gpu=True)
+                self.assertEqual(again.shape, cpu.shape)
+
     def test_legacy_overlay_keeps_frame_size(self):
         self.set(model=1)
         out = self.tube.apply(np.full((48, 64, 3), 180, np.uint8), 0)

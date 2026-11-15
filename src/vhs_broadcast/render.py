@@ -19,9 +19,14 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Re-render a VHS Broadcast take.")
     ap.add_argument("--session", "-s", required=True, help="take .json")
     ap.add_argument("--input", "-i", help="override source video path")
-    ap.add_argument("--output", "-o", required=True, help="output .mp4")
+    ap.add_argument("--output", "-o", required=True, help="output video (.mp4, .mov, .mkv or .gif)")
     ap.add_argument("--full", action="store_true",
                     help="render at full resolution (default: preview width)")
+    ap.add_argument("--format", choices=("h264", "prores", "ffv1", "gif"),
+                    help="export format (default: from the output extension)")
+    ap.add_argument("--interlace", choices=("bff", "tff"),
+                    help="weave frame pairs into interlaced frames at half the rate")
+    ap.add_argument("--repeat", type=int, default=1, help="write the result N times back to back")
     args = ap.parse_args(argv)
 
     params = ParameterSet()
@@ -47,7 +52,8 @@ def main(argv=None) -> int:
         sys.stdout.flush()
 
     render_to_file(source, args.output, params, timeline, effects,
-                   max_width=max_w, progress=prog)
+                   max_width=max_w, progress=prog, export_format=args.format,
+                   interlace=args.interlace, repeat=args.repeat)
     print(f"\nwrote {args.output}")
     return 0
 

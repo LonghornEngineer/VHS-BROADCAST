@@ -12,9 +12,9 @@ order, and agents see each effect's `stage` in `vhs-agent catalog`.
 | --- | --- |
 | Camera | OSD / Text, Light Flicker, Camcorder, Aspect, Frame Move / Wrap, Signal, Rolling Shutter |
 | Digital | Raster / Pixel Hold, Sync Loss, Downscale, Digital Codec (real), Datamosh / Motion Smear, Block Corruption, FMV / CD-ROM Video |
-| Tape / VCR | NTSC / VHS Signal (accurate), VCR Deck, Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
+| Tape / VCR | NTSC / VHS Signal (accurate), VCR Deck, Linear Edit / Dubs, Slew / Align, Tracking, Chroma, Laser Rot, Head Switch, Fuzz, Tearing, Motor Wow/Flutter |
 | Receiver / TV | Edge Ring, CRT Raster / Sync, TV Circuit Bend, Ghost, Scramble, Composite Artifacts, RF / Hum Bars |
-| CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask |
+| CRT screen | CRT Bloom, Scanlines, Phosphor Persistence, CRT Geometry / Mask, Filmed Off TV |
 | Stylize | Solarize, Signal Fold, Hue Shift, Pixel Sort, Game Boy, LED Matrix, Tile Scramble, RGB Channels / Bit Crush, Palette / Dither, Luma Key, Line Dither |
 | Composite | Video Feedback, Temporal Displacement |
 
@@ -221,6 +221,41 @@ lit phosphors, with Bloom's own Amount, Cutoff and Radius. The pixel-overlay glo
 
 The live preview caps the tube at 1080 lines so playback stays usable; exports and agent
 renders always use the full Display x, and the exported video takes the tube's size.
+
+**Compute: Auto** runs the display-size work on the graphics card through OpenCL when
+OpenCV can see one (on Linux with ROCm, install ROCm's OpenCL runtime; check with `clinfo`),
+and falls back to the CPU otherwise. GPU and CPU results agree to within one level.
+`OPENCV_OPENCL_DEVICE` picks a device if there is more than one.
+
+### Filmed off a TV
+
+**FILMED OFF TV** (screen stage, after the tube) is a camera pointed at the screen:
+
+- **Rolling bar**, worked out from timing rather than painted: the tube paints each row at
+  its own moment in the field and each phosphor fades within **Phosphor ms** (blue fastest,
+  green slowest); the camera only collects light while its **Shutter** is open. A shutter that
+  is not a whole number of fields (**1/48**, a 24 fps film camera, is the classic) leaves a
+  brighter band and a darker band that move at the beat between **Camera fps** and **Tube
+  fields /s**. Fast shutters catch only part of the scan. **Bar phase** slides it.
+- **Moire**: the camera's sensor (**Sensor res**, relative to the picture) samples the
+  phosphor mask on its own grid, turned by **Angle deg** and **Keystone**, with only **Lens
+  blur** in front, so mask detail it cannot resolve folds into waves. It needs the beam model
+  (a drawn mask) to show.
+- **Zoom**, **Glare** (room light on the glass), **Grain** and **White balance**.
+
+### Linear editing and dubs
+
+**LINEAR EDIT / DUBS** (tape stage) makes a cut look like a deck-to-deck edit without a
+time-base corrector. Edit points come from **keys** on **Edit point** (every change of its keyed
+value is a cut, so cuts sit on the timeline and scrubbing matches the render), from a **cut
+list** in the take (`effect_settings.linear_edit.cuts`, seconds; `load_edl` reads the record-in
+times of a CMX 3600 EDL), and from **Detect cuts** (scene changes in the incoming picture;
+render from the start for exact results). At each cut: **Flash** (black or deck blue for
+**Flash frames**), **Sync roll** (the picture rolls with the blanking bar showing until vertical
+hold locks), **Colour relock** (colour killer, then the hue swings in), **Head-switch tear**,
+all settling over **Settle s**, and an **Audio pop**. **Generations** softens, smears and
+desaturates the picture like dubs, and **Dub spread** gives each segment its own generation
+count. **Bars head s** opens the tape with colour bars and a 1 kHz tone.
 
 ### CRT raster and sync
 

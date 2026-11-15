@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from .base import Effect
+from .tvcamera import FilmedTVEffect
 
 
 def _u8(frame):
@@ -639,6 +640,9 @@ class CRTGeometryEffect(Effect):
         self.choice("raster", "Raster", ("Progressive", "Interlaced fields"))
         self.param("fields", "Fields /s", 59.94, 25, 120)
         self.param("field_decay", "Field decay", .5)
+        # GPU runs the display-size work as OpenCL on the graphics card when OpenCV can
+        # see one (falls back to the CPU otherwise). Results match to within a level.
+        self.choice("accel", "Compute", ("Auto (GPU if available)", "CPU"))
         # Overlay (legacy) model.
         self.param("pitch", "Overlay pitch px", 1, 1, 8, step=1)
         self.param("strength", "Overlay mask amt", .3)
@@ -651,6 +655,11 @@ class CRTGeometryEffect(Effect):
     def reset_state(self):
         self._carry = None
         self._carry_t = None
+
+    def fork_caches(self):
+        """Give an export copy its own tube caches (the preview may draw at the same time)."""
+        from .crt_tube import Tube
+        self._tube = Tube()
 
     def process(self, frame, t, v):
         if int(v["model"]) == 1:
@@ -666,8 +675,17 @@ class CRTGeometryEffect(Effect):
             # Phosphor glow carries over only from the field just drawn.
             if self._carry_t is not None and 0 < t - self._carry_t < .1:
                 history = self._carry
-        out, carry = self._tube.render(frame, v, scale=scale, field=field,
-                                       history=history, bloom=self._bloom(t))
+        from .crt_tube import gpu_available
+        gpu = int(v["accel"]) == 0 and gpu_available()
+        try:
+            out, carry = self._tube.render(frame, v, scale=scale, field=field,
+                                           history=history, bloom=self._bloom(t), gpu=gpu)
+        except cv2.error:
+            if not gpu:
+                raise
+            # A driver that advertises OpenCL but cannot run a kernel: draw on the CPU.
+            out, carry = self._tube.render(frame, v, scale=scale, field=field,
+                                           history=None, bloom=self._bloom(t), gpu=False)
         self._carry, self._carry_t = (carry, t) if field is not None else (None, None)
         return out
 
@@ -954,5 +972,5 @@ class FMVEffect(TemporalEffect):
 ADVANCED_EFFECTS = (VideoFeedbackEffect, MotionSmearEffect, CompositeEffect,
                     PaletteDitherEffect, TemporalDisplacementEffect,
                     BlockCorruptionEffect, PhosphorPersistenceEffect,
-                    CRTGeometryEffect, RFInterferenceEffect, LumaKeyEffect,
+                    CRTGeometryEffect, FilmedTVEffect, RFInterferenceEffect, LumaKeyEffect,
                     LineDitherEffect, FMVEffect)
